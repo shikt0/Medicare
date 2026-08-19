@@ -1,4 +1,4 @@
-Backend/.env
-Frontend/.env
-admin/.env
-
+.env
+.env.*
+!.env.example
+node_modules/
