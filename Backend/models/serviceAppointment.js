@@ -46,6 +46,13 @@ const serviceAppointmentSchema = new mongoose.Schema({
     publicId: { type: String, default: "" },
   },
 
+  notes: {
+    type: String,
+    trim: true,
+    maxlength: 1000,
+    default: "",
+  },
+
   fees: {
     type: Number,
       required: true,

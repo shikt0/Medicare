@@ -13,6 +13,10 @@ const safeNumber = (val) => {
   return Number.isFinite(n) ? n : null;
 };
 
+const SERVICE_APPOINTMENT_STATUSES = ["Pending", "Confirmed", "Rescheduled", "Completed", "Canceled"];
+const PAYMENT_STATUSES = ["Pending", "Paid", "Failed", "Refunded"];
+const escapeRegExp = (value = "") => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 function parseTimeString(timeStr) {
   if (!timeStr || typeof timeStr !== "string") return null;
   const t = timeStr.trim();
@@ -323,8 +327,8 @@ export const getServiceAppointment= async (req,res) => {
     if (mobile) filter.mobile = mobile;
     if (status) filter.status = status;
     if (search) {
-      const re = new RegExp(search, "i");
-      filter.$or = [{ patientName: re }, { mobile: re }, { notes: re }];
+      const re = new RegExp(escapeRegExp(String(search).trim()), "i");
+      filter.$or = [{ patientName: re }, { mobile: re }, { serviceName: re }, { notes: re }];
     }
 
     const appointment = await ServiceAppointment.find(filter)
@@ -374,10 +378,29 @@ export const updateServiceAppointment= async (req,res) => {
       const updates ={};
 
 
-       if (body.status !== undefined) updates.status = body.status;
-    if (body.notes !== undefined) updates.notes = body.notes;
+    if (body.status !== undefined) {
+      const status = String(body.status).trim();
+      if (!SERVICE_APPOINTMENT_STATUSES.includes(status)) {
+        return res.status(400).json({ success: false, message: "Invalid appointment status" });
+      }
+      updates.status = status;
+    }
+    if (body.notes !== undefined) {
+      const notes = String(body.notes).trim();
+      if (notes.length > 1000) {
+        return res.status(400).json({ success: false, message: "Notes cannot exceed 1000 characters" });
+      }
+      updates.notes = notes;
+    }
     if (body.payment !== undefined) updates.payment = body.payment;
-    if (body["payment.status"] !== undefined) updates["payment.status"] = body["payment.status"];
+    if (body["payment.status"] !== undefined) {
+      const paymentStatus = String(body["payment.status"]).trim();
+      if (!PAYMENT_STATUSES.includes(paymentStatus)) {
+        return res.status(400).json({ success: false, message: "Invalid payment status" });
+      }
+      updates["payment.status"] = paymentStatus;
+      if (paymentStatus === "Paid") updates["payment.paidAt"] = new Date();
+    }
 
     if (body.rescheduledTo) {
       const { date, time } = body.rescheduledTo || {};
@@ -388,9 +411,11 @@ export const updateServiceAppointment= async (req,res) => {
         updates.date = date;
       }
       if (time) {
-        updates.rescheduledTo.time = String(time);
         const parsed = parseTimeString(String(time));
         if (!parsed) return res.status(400).json({ success: false, message: "rescheduledTo.time couldn't be parsed" });
+        updates.rescheduledTo.hour = parsed.hour;
+        updates.rescheduledTo.minute = parsed.minute;
+        updates.rescheduledTo.ampm = parsed.ampm;
         updates.hour = parsed.hour;
         updates.minute = parsed.minute;
         updates.ampm = parsed.ampm;
@@ -464,18 +489,39 @@ export const getServiceAppointmentStats= async (req,res) => {
       {
         $addFields: {
           totalAppointments: { $size: "$appointments" },
+          pending: { $size: { $filter: { input: "$appointments", as: "a", cond: { $eq: ["$$a.status", "Pending"] } } } },
+          confirmed: { $size: { $filter: { input: "$appointments", as: "a", cond: { $eq: ["$$a.status", "Confirmed"] } } } },
+          rescheduled: { $size: { $filter: { input: "$appointments", as: "a", cond: { $eq: ["$$a.status", "Rescheduled"] } } } },
           completed: { $size: { $filter: { input: "$appointments", as: "a", cond: { $eq: ["$$a.status", "Completed"] } } } },
           canceled: { $size: { $filter: { input: "$appointments", as: "a", cond: { $eq: ["$$a.status", "Canceled"] } } } },
+          earning: {
+            $sum: {
+              $map: {
+                input: { $filter: { input: "$appointments", as: "a", cond: { $eq: ["$$a.status", "Completed"] } } },
+                as: "completedAppointment",
+                in: { $ifNull: ["$$completedAppointment.fees", "$price"] },
+              },
+            },
+          },
         },
       },
-      { $addFields: { earning: { $multiply: ["$completed", "$price"] } } },
-      { $project: { name: 1, price: 1, image: "$imageUrl", totalAppointments: 1, completed: 1, canceled: 1, earning: 1 } },
-      { $sort: { createdAt: -1 } },
+      { $project: { name: 1, price: 1, available: 1, image: "$imageUrl", totalAppointments: 1, pending: 1, confirmed: 1, rescheduled: 1, completed: 1, canceled: 1, earning: 1 } },
+      { $sort: { totalAppointments: -1, name: 1 } },
     ]);
+    const summary = services.reduce((total, service) => ({
+      totalAppointments: total.totalAppointments + Number(service.totalAppointments || 0),
+      pending: total.pending + Number(service.pending || 0),
+      confirmed: total.confirmed + Number(service.confirmed || 0),
+      rescheduled: total.rescheduled + Number(service.rescheduled || 0),
+      completed: total.completed + Number(service.completed || 0),
+      canceled: total.canceled + Number(service.canceled || 0),
+      earning: total.earning + Number(service.earning || 0),
+    }), { totalAppointments: 0, pending: 0, confirmed: 0, rescheduled: 0, completed: 0, canceled: 0, earning: 0 });
     return res.json({
       success:true,
       services,
-      totalServices:services.length
+      totalServices:services.length,
+      summary,
     });
   } catch (err) {
     console.error("getlServiceAppointmentStats error:", err);

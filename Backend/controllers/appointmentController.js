@@ -62,7 +62,7 @@ export const getAppointment= async (req,res) => {
     if (createdBy) filter.createdBy = createdBy;
     if (search) {
       const re = new RegExp(search, "i");
-      filter.$or = [{ patientName: re }, { mobile: re }, { notes: re }];
+      filter.$or = [{ patientName: re }, { mobile: re }, { doctorName: re }, { speciality: re }, { notes: re }];
     }
 
     const items =await Appointment.find(filter).sort({ createdAt:-1}).skip(skip).limit(limit).populate("doctorId","name specialization owner imageUrl image").lean();
@@ -467,9 +467,18 @@ export const updateAppointment= async (req,res) => {
     if (body.status) update.status = body.status;
     if (body.notes !== undefined) update.notes = body.notes;
 
-    if (body.date && body.time) {
+    if (body.date !== undefined || body.time !== undefined) {
+      if (!body.date || !body.time) {
+        return res.status(400).json({ success: false, message: "Both date and time are required to reschedule" });
+      }
       if (appt.status === "Completed" || appt.status === "Canceled") {
         return res.status(400).json({ success: false, message: "Cannot reschedule completed/canceled appointment" });
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(body.date))) {
+        return res.status(400).json({ success: false, message: "Date must be in YYYY-MM-DD format" });
+      }
+      if (!/^(0?[1-9]|1[0-2]):[0-5]\d\s(AM|PM)$/i.test(String(body.time))) {
+        return res.status(400).json({ success: false, message: "Time must be in hh:mm AM/PM format" });
       }
       update.date = body.date;
       update.time = body.time;
@@ -504,6 +513,14 @@ export const cancelAppointment = async (req,res) => {
       message:"Appointment not found"
     });
 
+    if (appt.status === "Completed") {
+      return res.status(400).json({ success: false, message: "Cannot cancel a completed appointment" });
+    }
+
+    if (appt.status === "Canceled") {
+      return res.json({ success: true, appointment: appt });
+    }
+
     appt.status ="Canceled";
     await appt.save();
     return res.json({
@@ -527,13 +544,29 @@ export const getStats= async (req,res) => {
     const paidAgg = await Appointment.aggregate([{ $match: { "payment.status": "Paid" } }, { $group: { _id: null, total: { $sum: "$fees" } } }]);
     const revenue = (paidAgg[0] && paidAgg[0].total) || 0;
 
+    const groupedStatuses = await Appointment.aggregate([
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]);
+    const statusCounts = {
+      Pending: 0,
+      Confirmed: 0,
+      Completed: 0,
+      Canceled: 0,
+      Rescheduled: 0,
+    };
+    groupedStatuses.forEach((item) => {
+      if (Object.prototype.hasOwnProperty.call(statusCounts, item._id)) {
+        statusCounts[item._id] = item.count;
+      }
+    });
+
     const sevenDaysAgo= new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     const recent = await Appointment.countDocuments({createdAt:{$gte:sevenDaysAgo}});
 
     return res.json({
       success:true,
-      stats:{total,revenue,recentLast7Days:recent}
+      stats:{total,revenue,recentLast7Days:recent,statusCounts}
     });
 
   } catch (err) {

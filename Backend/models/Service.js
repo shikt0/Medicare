@@ -6,7 +6,7 @@ const serviceSchema =new mongoose.Schema({
         about: { type: String, default: "" },
     shortDescription: { type: String, default: "" },
 
-    price: { type: Number, default: 0 },
+    price: { type: Number, min: 0, default: 0 },
     available: { type: Boolean, default: true },
 
     imageUrl: { type: String, default: null },

@@ -2,16 +2,13 @@ import React from 'react'
 import { Route, Routes } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import Hero from './pages/Hero'
-
-const adminPages = [
-  { path: '/add', title: 'Add Doctor' },
-  { path: '/list', title: 'List Doctors' },
-  { path: '/appointments', title: 'Appointments' },
-  { path: '/service-dashboard', title: 'Service Dashboard' },
-  { path: '/add-service', title: 'Add Service' },
-  { path: '/list-service', title: 'List Services' },
-  { path: '/service-appointments', title: 'Service Appointments' },
-]
+import AddDoctor from './pages/AddDoctor'
+import DoctorsList from './pages/DoctorsList'
+import Appointments from './pages/Appointments'
+import ServiceDashboard from './pages/ServiceDashboard'
+import AddService from './pages/AddService'
+import ServicesList from './pages/ServicesList'
+import ServiceAppointments from './pages/ServiceAppointments'
 
 const App = () => {
   return (
@@ -19,13 +16,13 @@ const App = () => {
       <Navbar />
       <Routes>
         <Route path="/" element={<Hero/>}/>
-        {adminPages.map((page) => (
-          <Route
-            key={page.path}
-            path={page.path}
-            element={<AdminPage title={page.title} />}
-          />
-        ))}
+        <Route path="/add" element={<AddDoctor />} />
+        <Route path="/list" element={<DoctorsList />} />
+        <Route path="/appointments" element={<Appointments />} />
+        <Route path="/service-dashboard" element={<ServiceDashboard />} />
+        <Route path="/add-service" element={<AddService />} />
+        <Route path="/list-service" element={<ServicesList />} />
+        <Route path="/service-appointments" element={<ServiceAppointments />} />
         <Route path="*" element={<AdminPage title="Page Not Found" />} />
       </Routes>
     </>

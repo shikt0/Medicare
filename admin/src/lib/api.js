@@ -41,6 +41,7 @@ function withQuery(path, params = {}) {
 
 export const api = {
   getDoctors: (params) => request(withQuery('/api/doctors', params)).then((data) => data.data || data.doctors || []),
+  getDoctorsPage: (params) => request(withQuery('/api/doctors', params)),
   createDoctor: (formData) => request('/api/doctors', { method: 'POST', body: formData }),
   deleteDoctor: (id) => request(`/api/doctors/${id}`, { method: 'DELETE' }),
 
@@ -50,10 +51,14 @@ export const api = {
   deleteService: (id) => request(`/api/services/${id}`, { method: 'DELETE' }),
 
   getAppointments: (params) => request(withQuery('/api/appointments', params)).then((data) => data.appointment || data.appointments || []),
+  getAppointmentsPage: (params) => request(withQuery('/api/appointments', params)),
+  getAppointmentStats: () => request('/api/appointments/stats/summary'),
   updateAppointment: (id, body) => request(`/api/appointments/${id}`, { method: 'PUT', body }),
   cancelAppointment: (id) => request(`/api/appointments/${id}/cancel`, { method: 'POST', body: {} }),
 
   getServiceAppointments: (params) => request(withQuery('/api/service-appointments', params)).then((data) => data.appointment || data.data || []),
+  getServiceAppointmentsPage: (params) => request(withQuery('/api/service-appointments', params)),
+  getServiceAppointmentStats: () => request('/api/service-appointments/stats/summary'),
   updateServiceAppointment: (id, body) => request(`/api/service-appointments/${id}`, { method: 'PUT', body }),
   cancelServiceAppointment: (id) => request(`/api/service-appointments/${id}/cancel`, { method: 'POST', body: {} }),
 }

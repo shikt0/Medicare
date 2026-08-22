@@ -114,7 +114,7 @@ export const pageStyles = {
   
   statusBadge: "text-xs px-3 py-1 rounded-full",
   
-  cancelButton: (isDisabled, isCompleted) => 
+  cancelButton: (isDisabled, _isCompleted) =>
     `px-3 py-2 cursor-pointer rounded-full text-sm flex items-center gap-2 transition ${
       isDisabled
         ? "bg-rose-50 text-rose-400 opacity-60 cursor-not-allowed"

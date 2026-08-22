@@ -210,7 +210,7 @@ export const getDoctors = async (req, res) => {
           }
         }
       },
-      { $project: { appointments: 0 } },
+      { $project: { appointments: 0, password: 0 } },
       { $sort: { name: 1 } },
       { $skip: skip },
       { $limit: limit }
