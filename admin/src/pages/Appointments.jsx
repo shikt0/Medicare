@@ -216,9 +216,9 @@ export default function Appointments() {
   }
 
   return (
-    <main className="min-h-[calc(100vh-5rem)] bg-slate-50 px-4 py-7 sm:px-6 lg:px-8">
+    <main className="admin-page min-h-[calc(100vh-5rem)] bg-slate-50 px-4 py-7 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[90rem]">
-        <header className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <header className="page-heading mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-emerald-600">Booking management</p>
             <h1 className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">Appointments</h1>

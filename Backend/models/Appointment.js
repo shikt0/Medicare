@@ -10,6 +10,8 @@ const appointmentSchema = new mongoose.Schema({
     mobile: { type: String, required: true, trim: true },
     age: { type: Number, default: null },
     gender: { type: String, default: "" },
+    notes: { type: String, default: "", maxlength: 1000 },
+    doctorNotes: { type: String, default: "", maxlength: 1000 },
 
     doctorId: {
       type: mongoose.Schema.Types.ObjectId,

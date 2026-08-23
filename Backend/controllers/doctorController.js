@@ -401,13 +401,14 @@ message: "doctor not found"});
 
 export async function doctorLogin(req, res) {
     try {
-
-        console.log("LOGIN BODY:", req.body);
-        console.log("CONTENT TYPE:", req.headers["content-type"]);
-
         const { email, password } = req.body || {};
 
-        const doc = await Doctor.findOne({email: email.toLowerCase()}).select("+password");
+        if (!email?.trim() || !password) return res.status(400).json({
+            success: false,
+            message: "Email and password are required"
+        });
+
+        const doc = await Doctor.findOne({email: email.trim().toLowerCase()}).select("+password");
         if(!doc) return res.status(401).json({
             success:false,
             message:"Invalid Creds"

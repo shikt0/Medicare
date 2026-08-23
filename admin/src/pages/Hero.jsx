@@ -149,9 +149,9 @@ export default function Hero() {
   if (loading) return <DashboardSkeleton />
 
   return (
-    <main className="min-h-[calc(100vh-6rem)] bg-slate-50 px-4 py-7 sm:px-6 lg:px-8">
+    <main className="admin-page min-h-[calc(100vh-6rem)] bg-slate-50 px-4 py-7 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
-        <header className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <header className="page-heading mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-emerald-600">Medicare admin</p>
             <h1 className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">Dashboard</h1>
@@ -608,7 +608,7 @@ function EmptySection({ icon: EmptyIcon, title, detail }) {
 
 function DashboardSkeleton() {
   return (
-    <main className="min-h-[calc(100vh-6rem)] bg-slate-50 px-4 py-7 sm:px-6 lg:px-8" aria-busy="true">
+    <main className="admin-page min-h-[calc(100vh-6rem)] bg-slate-50 px-4 py-7 sm:px-6 lg:px-8" aria-busy="true">
       <div className="mx-auto max-w-7xl animate-pulse">
         <div className="mb-7 h-20 max-w-md rounded-2xl bg-slate-200" />
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

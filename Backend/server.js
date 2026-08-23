@@ -8,6 +8,8 @@ import doctorRouter from './routes/doctorRouter.js';
 import serviceRouter from './routes/serviceRouter.js';
 import appointmentRouter from './routes/appointementRounter.js';
 import serviceAppointmentRouter from './routes/serviceAppointmentRouter.js';
+import contactRouter from './routes/contactRouter.js';
+import doctorPortalRouter from './routes/doctorPortalRouter.js';
 
 
 
@@ -46,6 +48,8 @@ app.use(express.json({limit:"20mb"}));
 app.use(express.urlencoded({limit: "20mb",extended:true}));
 app.use("/api/appointments",appointmentRouter);
 app.use("/api/service-appointments", serviceAppointmentRouter);
+app.use("/api/contact", contactRouter);
+app.use("/api/doctor-portal", doctorPortalRouter);
 
 //DB
 

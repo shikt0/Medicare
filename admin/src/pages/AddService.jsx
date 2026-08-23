@@ -187,9 +187,9 @@ export default function AddService() {
   }
 
   return (
-    <main className="min-h-[calc(100vh-5rem)] bg-slate-50 px-4 py-7 sm:px-6 lg:px-8">
+    <main className="admin-page min-h-[calc(100vh-5rem)] bg-slate-50 px-4 py-7 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
-        <header className="mb-7">
+        <header className="page-heading mb-7">
           <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-emerald-600">Service management</p>
           <h1 className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">Add a service</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Create a bookable care service with pricing, patient guidance, imagery, and available appointment slots.</p>
