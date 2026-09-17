@@ -31,6 +31,7 @@ const buildFrontendBase = (req) => {
 
 function resolveClerkUserId(req) {
   try {
+    if (req.actor?.authType === 'clerk') return req.actor.id;
     const auth = req.auth || {};
     const fromReq = auth?.userId || auth?.user_id || auth?.user?.id || req.user?.id || null;
     if (fromReq) return fromReq;
@@ -89,21 +90,15 @@ export const getAppointment= async (req,res) => {
 export const getAppointmentByPatient= async (req,res) => {
 
     try {
-        const queryCreatedBy=req.query.createdBy || null;
-        const clerkUserId =req.auth?.userId || null;
-        const resolvedCreatedBy=queryCreatedBy||clerkUserId|| null;
-
-        console.log("resolvedCreatedBy (query or req.auth.userId):",resolvedCreatedBy);
-        if(!resolvedCreatedBy && !req.query.mobile){
+        const resolvedCreatedBy=req.actor?.id || resolveClerkUserId(req);
+        if(!resolvedCreatedBy){
             return res.status(401).json({
                 success: false,
                 message:"Authentication required."
             });
         }
 
-        const filter={};
-        if(resolvedCreatedBy ) filter.createdBy = resolvedCreatedBy;
-        if(req.query.mobile) filter.mobile= req.query.mobile;
+        const filter={createdBy:resolvedCreatedBy};
 
         const appointments= await Appointment.find(filter).sort({
             date:1,
@@ -513,6 +508,10 @@ export const cancelAppointment = async (req,res) => {
       message:"Appointment not found"
     });
 
+    if (req.actor?.role === 'patient' && appt.createdBy !== req.actor.id) {
+      return res.status(404).json({ success: false, message: "Appointment not found" });
+    }
+
     if (appt.status === "Completed") {
       return res.status(400).json({ success: false, message: "Cannot cancel a completed appointment" });
     }
@@ -587,6 +586,10 @@ export const getAppointmentByDoctor =async (req,res) => {
       success:false,
       message: "Doctor id req"
     });
+
+    if (req.actor?.role === 'doctor' && req.actor.id !== String(doctorId)) {
+      return res.status(403).json({ success: false, message: "You can only view your own appointments" });
+    }
 
      const { mobile, status, search = "", limit: limitRaw = 50, page: pageRaw = 1 } = req.query;
     const limit = Math.min(200, Math.max(1, parseInt(limitRaw, 10) || 50));

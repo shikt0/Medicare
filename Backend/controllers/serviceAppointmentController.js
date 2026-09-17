@@ -48,6 +48,7 @@ const buildFrontendBase = (req) => {
 
 function resolveClerkUserId(req) {
   try {
+    if (req.actor?.authType === 'clerk') return req.actor.id;
     const auth = req.auth || {};
     const candidate = auth?.userId || auth?.user_id || auth?.user?.id || req.user?.id || null;
     if (candidate) return candidate;
@@ -463,6 +464,9 @@ export const cancelServiceAppointment= async (req,res) => {
     const appt =await ServiceAppointment.findById(id);
 
      if (!appt) return res.status(404).json({ success: false, message: "Not found" });
+    if (req.actor?.role === 'patient' && appt.createdBy !== req.actor.id) {
+      return res.status(404).json({ success: false, message: "Not found" });
+    }
     if (appt.status === "Completed") return res.status(400).json({ success: false, message: "Cannot cancel a completed appointment" });
 
     appt.status = "Canceled";
@@ -534,17 +538,13 @@ export const getServiceAppointmentStats= async (req,res) => {
 
 export const getServiceAppointmentByPatient = async (req,res) => {
   try {
-    const clerkUserId=resolveClerkUserId(req);
-    const {createdBy,mobile}= req.query;
-    const resolvedCreatedBy=createdBy || clerkUserId ||null;
-    if(!resolvedCreatedBy && !mobile) return res.json({
+    const resolvedCreatedBy=req.actor?.id || resolveClerkUserId(req);
+    if(!resolvedCreatedBy) return res.json({
       success:true,
       data:[]
     });
 
-    const filter ={};
-    if(resolvedCreatedBy) filter.createdBy= resolvedCreatedBy;
-    if(mobile) filter.mobile=mobile;
+    const filter ={createdBy:resolvedCreatedBy};
 
     const list= await ServiceAppointment.find(filter).sort({createdAt:-1}).lean();
     return res.json({

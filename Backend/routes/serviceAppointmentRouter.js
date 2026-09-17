@@ -1,21 +1,20 @@
 import express from 'express';
-import { clerkMiddleware,requireAuth } from '@clerk/express';
-
 import { getServiceAppointment, confirmServicePayment,getServiceAppointmentStats, CreateServiceAppointment, getServiceAppointmentByPatient, getServiceAppointmentById, updateServiceAppointment, cancelServiceAppointment } from '../controllers/serviceAppointmentController.js';
+import { authenticateActor, requireRole } from '../middlewares/auth.js';
 
 const serviceAppointmentRouter=express.Router();
 
-serviceAppointmentRouter.get("/",getServiceAppointment);
+serviceAppointmentRouter.get("/",authenticateActor,requireRole('admin'),getServiceAppointment);
 serviceAppointmentRouter.get("/confirm", confirmServicePayment);
-serviceAppointmentRouter.get("/stats/summary",getServiceAppointmentStats);
+serviceAppointmentRouter.get("/stats/summary",authenticateActor,requireRole('admin'),getServiceAppointmentStats);
 
 
-serviceAppointmentRouter.post("/",clerkMiddleware(),requireAuth(),CreateServiceAppointment);
+serviceAppointmentRouter.post("/",authenticateActor,requireRole('patient'),CreateServiceAppointment);
 
-serviceAppointmentRouter.get("/me",clerkMiddleware(),requireAuth(), getServiceAppointmentByPatient);
+serviceAppointmentRouter.get("/me",authenticateActor,requireRole('patient'),getServiceAppointmentByPatient);
 
-serviceAppointmentRouter.get("/:id",getServiceAppointmentById);
-serviceAppointmentRouter.put("/:id",updateServiceAppointment);
-serviceAppointmentRouter.post("/:id/cancel", cancelServiceAppointment);
+serviceAppointmentRouter.get("/:id",authenticateActor,requireRole('admin'),getServiceAppointmentById);
+serviceAppointmentRouter.put("/:id",authenticateActor,requireRole('admin'),updateServiceAppointment);
+serviceAppointmentRouter.post("/:id/cancel",authenticateActor,requireRole('patient','admin'),cancelServiceAppointment);
 
 export default serviceAppointmentRouter;

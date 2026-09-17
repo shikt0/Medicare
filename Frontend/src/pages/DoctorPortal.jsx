@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Activity, ArrowRight, Banknote, Bell, CalendarCheck, CalendarDays, Check, CheckCircle2,
   ChevronRight, CircleUserRound, ClipboardList, Clock3, Edit3, LayoutDashboard, LoaderCircle,
-  LogOut, Menu, MessageSquareText, Phone, Plus, RefreshCw, Save, Search, ShieldCheck,
+  LogOut, Menu, MessageSquareText, Phone, Plus, RefreshCw, Save, Search, ShieldCheck, FlaskConical,
   Sparkles, UserRound, UsersRound, X, XCircle,
 } from 'lucide-react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
@@ -16,6 +16,7 @@ import '../doctorPortal.css'
 const navItems = [
   { label: 'Overview', path: '/doctor-portal', icon: LayoutDashboard, end: true },
   { label: 'Appointments', path: '/doctor-portal/appointments', icon: ClipboardList },
+  { label: 'Laboratory', path: '/doctor-portal/laboratory', icon: FlaskConical },
   { label: 'Schedule', path: '/doctor-portal/schedule', icon: CalendarDays },
   { label: 'Profile', path: '/doctor-portal/profile', icon: CircleUserRound },
 ]
@@ -28,6 +29,7 @@ export default function DoctorPortal() {
   const [session, setSession] = useState(() => readDoctorSession())
   const [doctor, setDoctor] = useState(session?.doctor || null)
   const [appointments, setAppointments] = useState([])
+  const [labTests, setLabTests] = useState([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
@@ -39,7 +41,7 @@ export default function DoctorPortal() {
   const logout = useCallback(() => {
     clearDoctorSession()
     setSession(null)
-    navigate('/doctor-admin/login', { replace: true })
+    navigate('/doctor/login', { replace: true })
   }, [navigate])
 
   const loadWorkspace = useCallback(async (refresh = false) => {
@@ -48,12 +50,14 @@ export default function DoctorPortal() {
     else setLoading(true)
     setError('')
     try {
-      const [profile, appointmentPayload] = await Promise.all([
+      const [profile, appointmentPayload, laboratory] = await Promise.all([
         patientApi.getDoctorPortalMe(session.token),
         patientApi.getDoctorPortalAppointments(session.token, { limit: 200 }),
+        patientApi.getDoctorLabTests(session.token, { limit: 200 }),
       ])
       setDoctor(profile)
       setAppointments(appointmentPayload.appointments || [])
+      setLabTests(laboratory)
       setScheduleDraft(normalizeSchedule(profile.schedule))
       setProfileDraft(profileFromDoctor(profile))
       const nextSession = { token: session.token, doctor: profile }
@@ -73,7 +77,7 @@ export default function DoctorPortal() {
 
   useEffect(() => {
     if (!session?.token) {
-      navigate('/doctor-admin/login', { replace: true })
+      navigate('/doctor/login', { replace: true })
       return undefined
     }
     const timeout = window.setTimeout(() => loadWorkspace(), 0)
@@ -120,6 +124,13 @@ export default function DoctorPortal() {
     setNotice({ tone: 'success', text: 'Your professional profile has been updated.' })
   }
 
+  async function orderLabTest(body) {
+    const created = await patientApi.createLabTest(body, session.token)
+    setLabTests((current) => [created, ...current])
+    setNotice({ tone: 'success', text: 'Laboratory test ordered for the patient.' })
+    return created
+  }
+
   if (!session?.token) return null
 
   const section = location.pathname.split('/')[2] || 'overview'
@@ -147,6 +158,8 @@ export default function DoctorPortal() {
           {error && <ErrorState message={error} onRetry={() => loadWorkspace(true)} />}
           {loading ? <LoadingPanel label="Preparing your clinical workspace..." /> : section === 'appointments' ? (
             <AppointmentsView appointments={appointments} onUpdate={updateAppointment} />
+          ) : section === 'laboratory' ? (
+            <LaboratoryView appointments={appointments} tests={labTests} onOrder={orderLabTest} />
           ) : section === 'schedule' ? (
             <ScheduleView doctor={doctor} draft={scheduleDraft} setDraft={setScheduleDraft} onSave={saveSchedule} onToggleAvailability={toggleAvailability} />
           ) : section === 'profile' ? (
@@ -269,6 +282,21 @@ function AppointmentManager({ item, onClose, onUpdate }) {
   </div><footer>{!terminal && <><button type="button" disabled={saving} onClick={() => save({ status: item.status === 'Pending' ? 'Confirmed' : 'Completed', doctorNotes: notes }, item.status === 'Pending' ? 'Appointment confirmed.' : 'Appointment completed.')} className="doctor-drawer__primary"><CheckCircle2 size={16} />{item.status === 'Pending' ? 'Confirm appointment' : 'Mark completed'}</button><button type="button" disabled={saving} onClick={() => save({ status: 'Canceled', doctorNotes: notes }, 'Appointment canceled.')} className="doctor-drawer__danger">Cancel appointment</button></>}</footer></div></div>
 }
 
+function LaboratoryView({ appointments, tests, onOrder }) {
+  const eligibleAppointments = appointments.filter((item) => item.createdBy && item.status !== 'Canceled')
+  const [form, setForm] = useState({ appointmentId: '', testName: '', testCategory: 'Hematology', sampleType: 'Blood', priority: 'normal', clinicalNote: '' })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [status, setStatus] = useState('All')
+  const visible = tests.filter((item) => status === 'All' || item.status === status)
+  function update(event) { const { name, value } = event.target; setForm((current) => ({ ...current, [name]: value })); setError('') }
+  async function submit(event) {
+    event.preventDefault(); setSaving(true); setError('')
+    try { await onOrder(form); setForm((current) => ({ ...current, appointmentId: '', testName: '', clinicalNote: '' })) } catch (orderError) { setError(orderError.message || 'Unable to order the laboratory test.') } finally { setSaving(false) }
+  }
+  return <section className="doctor-view"><ViewHeading kicker="Connected diagnostics" title="Laboratory" text="Order tests from an existing patient appointment and follow results through the laboratory workflow." /><div className="doctor-lab-layout"><form className="doctor-panel doctor-lab-order" onSubmit={submit}><PanelHeading icon={FlaskConical} title="New test order" text="Patient identity is securely copied from the selected appointment." /><div className="doctor-lab-form"><label className="doctor-form-field doctor-lab-span"><span>Patient appointment <i>*</i></span><select name="appointmentId" value={form.appointmentId} onChange={update} required><option value="">Choose patient appointment</option>{eligibleAppointments.map((item) => <option key={getId(item)} value={getId(item)}>{item.patientName} · {item.date} {item.time}</option>)}</select></label><ProfileField label="Test name" name="testName" value={form.testName} onChange={update} required placeholder="e.g. Complete Blood Count" /><label className="doctor-form-field"><span>Category</span><select name="testCategory" value={form.testCategory} onChange={update}>{['Hematology','Biochemistry','Microbiology','Immunology','Pathology','Other'].map((item) => <option key={item}>{item}</option>)}</select></label><ProfileField label="Sample type" name="sampleType" value={form.sampleType} onChange={update} required /><label className="doctor-form-field"><span>Priority</span><select name="priority" value={form.priority} onChange={update}><option value="normal">Normal</option><option value="urgent">Urgent</option></select></label><label className="doctor-form-field doctor-lab-span"><span>Clinical note <small>{form.clinicalNote.length}/1500</small></span><textarea name="clinicalNote" value={form.clinicalNote} onChange={update} rows="4" maxLength="1500" placeholder="Reason for test and relevant clinical context" /></label>{error && <p className="doctor-inline-error doctor-lab-span"><XCircle size={16} />{error}</p>}<button disabled={saving || !eligibleAppointments.length} className="doctor-profile-save doctor-lab-span">{saving ? <LoaderCircle size={17} className="animate-spin" /> : <Plus size={17} />}{saving ? 'Ordering...' : 'Order laboratory test'}</button>{!eligibleAppointments.length && <p className="doctor-lab-help doctor-lab-span">A patient appointment linked to a secure patient account is required before ordering a test.</p>}</div></form><div className="doctor-panel doctor-lab-history"><PanelHeading icon={ClipboardList} title="Test orders" text={`${tests.length} orders in your practice history.`} /><div className="doctor-lab-filters">{['All','ordered','sample-collected','processing','completed','cancelled'].map((value) => <button type="button" key={value} onClick={() => setStatus(value)} className={status === value ? 'is-active' : ''}>{prettyStatus(value)}</button>)}</div>{visible.length ? <div className="doctor-lab-list">{visible.map((item) => <article key={item._id}><div><span>{item.testCategory || item.sampleType}</span><h3>{item.testName}</h3><p>{item.patientName} · {new Date(item.orderedAt).toLocaleDateString()}</p></div><div><span className={`doctor-lab-priority doctor-lab-priority--${item.priority}`}>{prettyStatus(item.priority)}</span><span className="doctor-lab-status">{prettyStatus(item.status)}</span></div>{item.result && <p className="doctor-lab-result"><strong>Result:</strong> {item.result}</p>}</article>)}</div> : <CompactEmpty icon={FlaskConical} title="No test orders in this view" text="New laboratory orders and results will appear here." />}</div></div></section>
+}
+
 function ScheduleView({ doctor, draft, setDraft, onSave, onToggleAvailability }) {
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
@@ -349,6 +377,7 @@ function profileFromDoctor(doctor) { return Object.fromEntries(profileFields.map
 function sortAppointments(first, second) { return `${first.date || ''} ${toTwentyFourHour(first.time)}`.localeCompare(`${second.date || ''} ${toTwentyFourHour(second.time)}`) }
 function sortTimes(first, second) { return toTwentyFourHour(first).localeCompare(toTwentyFourHour(second)) }
 function initials(value = 'Doctor') { return String(value).split(' ').filter(Boolean).map((part) => part[0]).join('').slice(0, 2).toUpperCase() }
+function prettyStatus(value) { return String(value || '').split('-').map((part) => part ? part[0].toUpperCase() + part.slice(1) : '').join(' ') }
 function toTwelveHour(value = '') { const [rawHour, minute = '00'] = value.split(':'); const number = Number(rawHour); if (!Number.isFinite(number)) return ''; const suffix = number >= 12 ? 'PM' : 'AM'; return `${String(number % 12 || 12).padStart(2, '0')}:${minute} ${suffix}` }
 function toTwentyFourHour(value = '') { const match = String(value).match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i); if (!match) return value.length >= 5 ? value.slice(0, 5) : ''; let hour = Number(match[1]) % 12; if (match[3].toUpperCase() === 'PM') hour += 12; return `${String(hour).padStart(2, '0')}:${match[2]}` }
 function todayLabel() { return new Date().toLocaleDateString('en-BD', { weekday: 'long', month: 'long', day: 'numeric' }) }

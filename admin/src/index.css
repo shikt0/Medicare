@@ -60,6 +60,16 @@
   }
 }
 
+@layer components {
+  .control {
+    @apply h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-emerald-500;
+  }
+
+  .label {
+    @apply mb-1.5 block text-xs font-bold text-slate-600;
+  }
+}
+
 #root,
 .admin-shell {
   min-height: 100vh;

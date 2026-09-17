@@ -11,6 +11,9 @@ import Contact from './pages/Contact'
 import DoctorLogin from './pages/DoctorLogin'
 import PaymentResult from './pages/PaymentResult'
 import DoctorPortal from './pages/DoctorPortal'
+import LabResults from './pages/LabResults'
+import LoginPortal from './pages/LoginPortal'
+import PatientLogin from './pages/PatientLogin'
 
 const App = () => {
   return (
@@ -22,7 +25,12 @@ const App = () => {
         <Route path='/services' element={<Services/>}/>
         <Route path='/services/:id' element={<ServiceDetails/>}/>
         <Route path='/appointments' element={<Appointments/>}/>
+        <Route path='/lab-results' element={<LabResults/>}/>
         <Route path='/contact' element={<Contact/>}/>
+        <Route path='/login' element={<LoginPortal/>}/>
+        <Route path='/patient-login/*' element={<PatientLogin/>}/>
+        <Route path='/patient-sign-up/*' element={<PatientLogin mode="sign-up"/>}/>
+        <Route path='/doctor/login' element={<DoctorLogin/>}/>
         <Route path='/doctor-admin/login' element={<DoctorLogin/>}/>
         <Route path='/doctor-portal/*' element={<DoctorPortal/>}/>
         <Route path='/appointment/success' element={<PaymentResult kind="doctor" outcome="success"/>}/>

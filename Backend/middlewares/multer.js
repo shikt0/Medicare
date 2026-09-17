@@ -15,7 +15,7 @@ const storage= multer.diskStorage({
     },
 
     filename : function(req,file, cb){
-        const uniqueName = DataTransfer.now()+"-"+Math.round(Math.random()*1e9);
+        const uniqueName = Date.now()+"-"+Math.round(Math.random()*1e9);
         cb(
             null, uniqueName + path.extname(file.originalname)
         )
@@ -30,7 +30,7 @@ const storage= multer.diskStorage({
 
 //file filter
 
-const filefilter=(req,file,cb)=>{
+const fileFilter=(req,file,cb)=>{
     if(
         file.mimetype==="image/png" ||
         file.mimetype==="image/jpg" ||
@@ -40,7 +40,7 @@ const filefilter=(req,file,cb)=>{
         cb(null,true);
     }
     else{
-        cb(new Error("Only image files are aloowed",false));
+        cb(new Error("Only image files are allowed"),false);
     }
 };
 

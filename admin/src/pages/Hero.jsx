@@ -39,6 +39,7 @@ const initialDashboard = {
   serviceAppointmentMeta: {},
   appointmentStats: {},
   serviceStats: [],
+  workforceStats: {},
 }
 
 export default function Hero() {
@@ -64,6 +65,7 @@ export default function Hero() {
       ['serviceAppointments', 'service appointments', api.getServiceAppointmentsPage({ limit: 200 })],
       ['appointmentStats', 'appointment totals', api.getAppointmentStats()],
       ['serviceStats', 'service totals', api.getServiceAppointmentStats()],
+      ['workforceStats', 'workforce totals', api.getDashboard()],
     ]
 
     try {
@@ -94,6 +96,8 @@ export default function Hero() {
             next.appointmentStats = payload.stats || {}
           } else if (key === 'serviceStats') {
             next.serviceStats = payload.services || []
+          } else if (key === 'workforceStats') {
+            next.workforceStats = payload || {}
           } else {
             next[key] = Array.isArray(payload) ? payload : []
           }
@@ -218,6 +222,13 @@ export default function Hero() {
             detail="Paid and completed bookings"
             color="amber"
           />
+        </section>
+
+        <section aria-label="Workforce summary" className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <SummaryCard icon={UsersRound} label="Staff" value={(dashboard.workforceStats.staff || 0).toLocaleString()} detail={`${dashboard.workforceStats.staffByRole?.nurse || 0} nurses across the workforce`} color="emerald" />
+          <SummaryCard icon={UsersRound} label="Patients" value={(dashboard.workforceStats.patients || 0).toLocaleString()} detail="Unique patients with appointments" color="sky" />
+          <SummaryCard icon={Activity} label="Pending lab work" value={(dashboard.workforceStats.pendingLabs || 0).toLocaleString()} detail="Orders awaiting completion" color="violet" />
+          <SummaryCard icon={CalendarDays} label="Clinical appointments" value={(dashboard.workforceStats.appointments || 0).toLocaleString()} detail="All doctor appointments" color="amber" />
         </section>
 
         <section aria-label="Appointment status" className="my-6 grid grid-cols-2 gap-3 lg:grid-cols-4">

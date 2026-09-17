@@ -68,6 +68,9 @@ export const patientApi = {
   updateDoctorPortalAppointment: (id, body, token) => request(`/api/doctor-portal/appointments/${id}`, { method: 'PATCH', body, token }).then((payload) => payload.appointment),
   updateDoctorProfile: (id, body, token) => request(`/api/doctors/${id}`, { method: 'PUT', body, token }).then((payload) => payload.data),
   toggleDoctorAvailability: (id, token) => request(`/api/doctors/${id}/toggle-availability`, { method: 'POST', body: {}, token }).then((payload) => payload.data),
+  getMyLabResults: (token) => request('/api/lab-tests', { token }).then((payload) => payload.data || []),
+  getDoctorLabTests: (token, params = {}) => request(withQuery('/api/lab-tests', params), { token }).then((payload) => payload.data || []),
+  createLabTest: (body, token) => request('/api/lab-tests', { method: 'POST', body, token }).then((payload) => payload.data),
 }
 
 export { API_BASE }

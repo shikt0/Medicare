@@ -10,7 +10,8 @@ const careLinks = [
 
 const supportLinks = [
   ['Contact us', '/contact'],
-  ['Doctor portal', '/doctor-admin/login'],
+  ['Login portals', '/login'],
+  ['Doctor portal', '/doctor/login'],
   ['Patient home', '/'],
 ]
 

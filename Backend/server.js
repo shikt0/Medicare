@@ -10,6 +10,15 @@ import appointmentRouter from './routes/appointementRounter.js';
 import serviceAppointmentRouter from './routes/serviceAppointmentRouter.js';
 import contactRouter from './routes/contactRouter.js';
 import doctorPortalRouter from './routes/doctorPortalRouter.js';
+import authRouter from './routes/authRouter.js';
+import staffRouter from './routes/staffRouter.js';
+import shiftRouter from './routes/shiftRouter.js';
+import labRouter from './routes/labRouter.js';
+import recruitmentRouter from './routes/recruitmentRouter.js';
+import applicantRouter from './routes/applicantRouter.js';
+import announcementRouter from './routes/announcementRouter.js';
+import freelancerRouter from './routes/freelancerRouter.js';
+import dashboardRouter from './routes/dashboardRouter.js';
 
 
 
@@ -19,8 +28,10 @@ const port=4000;
 const allowedOrigins=[
     "http://localhost:5173",
     "http://localhost:5174",
+    "http://localhost:5175",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
+    "http://127.0.0.1:5175",
     process.env.FRONTEND_URL?.replace(/\/$/, ""),
 ].filter(Boolean)
 
@@ -50,6 +61,15 @@ app.use("/api/appointments",appointmentRouter);
 app.use("/api/service-appointments", serviceAppointmentRouter);
 app.use("/api/contact", contactRouter);
 app.use("/api/doctor-portal", doctorPortalRouter);
+app.use("/api/auth", authRouter);
+app.use("/api/staff", staffRouter);
+app.use("/api/shifts", shiftRouter);
+app.use("/api/lab-tests", labRouter);
+app.use("/api/jobs", recruitmentRouter);
+app.use("/api/applicants", applicantRouter);
+app.use("/api/announcements", announcementRouter);
+app.use("/api/freelancer-assignments", freelancerRouter);
+app.use("/api/dashboard", dashboardRouter);
 
 //DB
 

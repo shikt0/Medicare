@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowUpRight, KeyRound, Menu, ShieldCheck, UserRound, X } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
-import { useAuth, useClerk, UserButton } from '@clerk/react'
+import { useAuth, UserButton } from '@clerk/react'
 import logo from '../assets/logo.png'
 
 const navItems = [
@@ -9,6 +9,7 @@ const navItems = [
   { label: 'Doctors', href: '/doctors' },
   { label: 'Services', href: '/services' },
   { label: 'Appointments', href: '/appointments' },
+  { label: 'Lab Results', href: '/lab-results' },
   { label: 'Contact', href: '/contact' },
 ]
 
@@ -18,7 +19,6 @@ export default function Navbar() {
   const lastScrollY = useRef(0)
   const navRef = useRef(null)
   const { isSignedIn } = useAuth()
-  const clerk = useClerk()
 
   useEffect(() => {
     function handleScroll() {
@@ -75,15 +75,15 @@ export default function Navbar() {
         <div className="site-navbar__actions">
           {!isSignedIn ? (
             <>
-              <Link to="/doctor-admin/login" className="site-doctor-link">
+              <Link to="/login" className="site-doctor-link">
                 <UserRound size={16} />
-                <span>For doctors</span>
+                <span>Login portals</span>
                 <ArrowUpRight size={13} />
               </Link>
-              <button type="button" onClick={() => clerk.openSignIn()} className="site-login-button">
+              <Link to="/patient-login" className="site-login-button">
                 <KeyRound size={16} />
                 <span>Patient login</span>
-              </button>
+              </Link>
             </>
           ) : (
             <div className="site-user-button"><UserButton afterSignOutUrl="/" /></div>
@@ -128,17 +128,10 @@ export default function Navbar() {
 
           {!isSignedIn && (
             <div className="site-mobile-menu__actions">
-              <Link to="/doctor-admin/login" onClick={() => setIsOpen(false)} className="site-mobile-doctor-link">Doctor portal</Link>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsOpen(false)
-                  clerk.openSignIn()
-                }}
-                className="site-mobile-login-button"
-              >
+              <Link to="/login" onClick={() => setIsOpen(false)} className="site-mobile-doctor-link">All login portals</Link>
+              <Link to="/patient-login" onClick={() => setIsOpen(false)} className="site-mobile-login-button">
                 <KeyRound size={16} /> Patient login
-              </button>
+              </Link>
             </div>
           )}
         </div>

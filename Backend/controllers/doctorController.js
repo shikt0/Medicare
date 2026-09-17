@@ -1,6 +1,7 @@
 import Doctor from "../models/Doctor.js";
 import { uploadToCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 
 
 //helper function
@@ -101,7 +102,7 @@ export async function createDoctor(req,res) {
         const schedule= parseScheduleInput(body.schedule);
         const doc = new Doctor({
       email: emailLC,
-      password: body.password,
+      password: await bcrypt.hash(String(body.password), 12),
       name: body.name,
       specialization: body.specialization || "",
       imageUrl,
@@ -163,6 +164,7 @@ export async function createDoctor(req,res) {
 //to get doctor
 export const getDoctors = async (req, res) => {
   try {
+    const adminView = req.adminView === true;
     const { q = "", limit: limitRaw = 200, page: pageRaw = 1 } = req.query;
     const limit = Math.min(500, Math.max(1, parseInt(limitRaw, 10) || 200));
     const page = Math.max(1, parseInt(pageRaw, 10) || 1);
@@ -223,10 +225,6 @@ export const getDoctors = async (req, res) => {
       specialization: d.specialization || d.speciality || "",
       fee: d.fee ?? d.fees ?? d.consultationFee ?? 0,
       imageUrl: d.imageUrl || d.image || d.avatar || null,
-      appointmentsTotal: d.appointmentsTotal || 0,
-      appointmentsCompleted: d.appointmentsCompleted || 0,
-      appointmentsCanceled: d.appointmentsCanceled || 0,
-      earnings: d.earnings || 0,
       availability: d.availability ?? "Available",
       schedule: (d.schedule && typeof d.schedule === "object") ? d.schedule : {},
       patients: d.patients ?? "",
@@ -236,7 +234,13 @@ export const getDoctors = async (req, res) => {
       qualifications: d.qualifications ?? "",
       location: d.location ?? "",
       success: d.success ?? "",
-      raw: d,
+      ...(adminView ? {
+        email: d.email || '',
+        appointmentsTotal: d.appointmentsTotal || 0,
+        appointmentsCompleted: d.appointmentsCompleted || 0,
+        appointmentsCanceled: d.appointmentsCanceled || 0,
+        earnings: d.earnings || 0,
+      } : {}),
     }));
 
     const total = await Doctor.countDocuments(match);
@@ -254,7 +258,7 @@ export async function getDoctorById(req,res) {
 
     try {
         const{id}=req.params;
-        const doc= await Doctor.findById(id).select("-password").lean();
+        const doc= await Doctor.findById(id).select("-password -email").lean();
         if(!doc)
             return res.status(404).json({
         success:false,
@@ -276,7 +280,10 @@ export async function updateDoctor(req, res) {
     const { id } = req.params;
     const body = req.body || {};
 
-    if (!req.doctor || String(req.doctor._id || req.doctor.id) !== String(id)) {
+    const isAdmin = req.actor?.role === 'admin'
+    const isOwnerDoctor = req.actor?.role === 'doctor'
+      && String(req.doctor?._id || req.doctor?.id) === String(id)
+    if (!isAdmin && !isOwnerDoctor) {
       return res.status(403).json({ success: false, message: "Not authorized to update this doctor" });
     }
 
@@ -308,7 +315,7 @@ export async function updateDoctor(req, res) {
       existing.email = body.email.toLowerCase();
     }
 
-    if (body.password) existing.password = body.password;
+    if (body.password) existing.password = await bcrypt.hash(String(body.password), 12);
 
     await existing.save();
 
@@ -416,10 +423,20 @@ export async function doctorLogin(req, res) {
 
 
 
-        if(doc.password!== password) return res.status(401).json({
+        const storedPassword = String(doc.password || '')
+        const passwordMatches = storedPassword.startsWith('$2')
+          ? await bcrypt.compare(String(password), storedPassword)
+          : storedPassword === String(password)
+
+        if(!passwordMatches) return res.status(401).json({
             success:false,
             message:"Invalid Creds"
         });
+
+        if (!storedPassword.startsWith('$2')) {
+          doc.password = await bcrypt.hash(String(password), 12)
+          await doc.save()
+        }
 
         const secret = process.env.JWT_SECRET;
         if(!secret) return res.status(500).json({

@@ -44,6 +44,7 @@ export function StatCard({ label, value, detail }) {
 
 export function StatusBadge({ value }) {
   const normalized = String(value || 'Unknown')
+  const key = normalized.toLowerCase()
   const classes = {
     Available: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
     Unavailable: 'bg-rose-50 text-rose-700 ring-rose-200',
@@ -55,11 +56,31 @@ export function StatusBadge({ value }) {
     Paid: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
     Failed: 'bg-rose-50 text-rose-700 ring-rose-200',
     Refunded: 'bg-slate-100 text-slate-700 ring-slate-200',
+    active: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+    inactive: 'bg-rose-50 text-rose-700 ring-rose-200',
+    'on-leave': 'bg-amber-50 text-amber-700 ring-amber-200',
+    scheduled: 'bg-sky-50 text-sky-700 ring-sky-200',
+    cancelled: 'bg-rose-50 text-rose-700 ring-rose-200',
+    ordered: 'bg-sky-50 text-sky-700 ring-sky-200',
+    'sample-collected': 'bg-violet-50 text-violet-700 ring-violet-200',
+    processing: 'bg-amber-50 text-amber-700 ring-amber-200',
+    urgent: 'bg-rose-50 text-rose-700 ring-rose-200',
+    normal: 'bg-slate-100 text-slate-700 ring-slate-200',
+    open: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+    closed: 'bg-slate-100 text-slate-700 ring-slate-200',
+    applied: 'bg-sky-50 text-sky-700 ring-sky-200',
+    reviewing: 'bg-amber-50 text-amber-700 ring-amber-200',
+    shortlisted: 'bg-violet-50 text-violet-700 ring-violet-200',
+    rejected: 'bg-rose-50 text-rose-700 ring-rose-200',
+    hired: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+    assigned: 'bg-sky-50 text-sky-700 ring-sky-200',
+    accepted: 'bg-violet-50 text-violet-700 ring-violet-200',
+    'in-progress': 'bg-amber-50 text-amber-700 ring-amber-200',
   }
 
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${classes[normalized] || 'bg-slate-100 text-slate-700 ring-slate-200'}`}>
-      {normalized}
+    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${classes[normalized] || classes[key] || 'bg-slate-100 text-slate-700 ring-slate-200'}`}>
+      {key.split('-').map((part) => part ? part[0].toUpperCase() + part.slice(1) : '').join(' ')}
     </span>
   )
 }
