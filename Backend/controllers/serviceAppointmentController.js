@@ -1,5 +1,9 @@
 import ServiceAppointment from "../models/serviceAppointment.js";
 import Service from "../models/Service.js";
+import Staff from "../models/Staff.js";
+import AssignmentCursor from "../models/AssignmentCursor.js";
+import { roundRobinItem } from "../utils/roundRobin.js";
+import { evaluateCashPaymentOnCompletion } from "../utils/cashCompletion.js";
 import Stripe from 'stripe';
 import { getAuth } from "@clerk/express";
 
@@ -7,36 +11,17 @@ const stripeKey = process.env.STRIPE_SECRET_KEY || null;
 const stripe = stripeKey? new Stripe(stripeKey,{apiVersion: "2026-08-05"}) :null;
 
 //helpers
-const safeNumber = (val) => {
-  if (val === undefined || val === null || val === "") return null;
-  const n = Number(val);
-  return Number.isFinite(n) ? n : null;
-};
-
 const SERVICE_APPOINTMENT_STATUSES = ["Pending", "Confirmed", "Rescheduled", "Completed", "Canceled"];
 const PAYMENT_STATUSES = ["Pending", "Paid", "Failed", "Refunded"];
 const escapeRegExp = (value = "") => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 function parseTimeString(timeStr) {
-  if (!timeStr || typeof timeStr !== "string") return null;
-  const t = timeStr.trim();
-  const m = t.match(/([0-9]{1,2}):?([0-9]{0,2})\s*(AM|PM|am|pm)?/);
-  if (!m) return null;
-  let hh = parseInt(m[1], 10);
-  let mm = m[2] ? parseInt(m[2], 10) : 0;
-  const ampm = (m[3] || "").toUpperCase();
-  if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
-
-  if (ampm) {
-    if (hh < 1 || hh > 12 || mm < 0 || mm > 59) return null;
-    return { hour: hh, minute: mm, ampm };
-  }
-
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
-  if (hh === 0) return { hour: 12, minute: mm, ampm: "AM" };
-  if (hh === 12) return { hour: 12, minute: mm, ampm: "PM" };
-  if (hh > 12) return { hour: hh - 12, minute: mm, ampm: "PM" };
-  return { hour: hh, minute: mm, ampm: "AM" };
+  const match = String(timeStr || "").trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return null;
+  return { hour, minute, ampm: match[3].toUpperCase() };
 }
 
 const buildFrontendBase = (req) => {
@@ -63,6 +48,31 @@ function resolveClerkUserId(req) {
   }
 }
 
+async function getNextPathologistAssignment() {
+  const pathologists = await Staff.find({ role: "pathologist", status: "active" })
+    .sort({ employeeId: 1, _id: 1 })
+    .select("name employeeId")
+    .lean();
+
+  if (!pathologists.length) return null;
+
+  const cursor = await AssignmentCursor.findOneAndUpdate(
+    { _id: "service-pathologist" },
+    { $inc: { sequence: 1 } },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  ).lean();
+  const sequence = Number(cursor?.sequence || 1);
+  const pathologist = roundRobinItem(pathologists, sequence);
+
+  return {
+    assignedPathologist: pathologist._id,
+    assignedPathologistName: pathologist.name || "Pathologist",
+    assignedPathologistEmployeeId: pathologist.employeeId || "",
+    assignedAt: new Date(),
+    assignmentSequence: sequence,
+  };
+}
+
 //service appointment
 
 
@@ -82,14 +92,7 @@ export const CreateServiceAppointment = async (req,res) => {
       mobile,
       age,
       gender,
-      date,
-      time,
-      hour,
-      minute,
-      ampm,
       paymentMethod = "Online",
-      amount: amountFromBody,
-      fees: feesFromBody,
       email,
       meta = {},
       notes = "",
@@ -100,46 +103,11 @@ export const CreateServiceAppointment = async (req,res) => {
   if (!serviceId) return res.status(400).json({ success: false, message: "serviceId is required" });
     if (!patientName || !String(patientName).trim()) return res.status(400).json({ success: false, message: "patientName is required" });
     if (!mobile || !String(mobile).trim()) return res.status(400).json({ success: false, message: "mobile is required" });
-    if (!date || !String(date).trim()) return res.status(400).json({ success: false, message: "date is required (YYYY-MM-DD)" });
 
-    const numericAmount = safeNumber(amountFromBody ?? feesFromBody ?? 0);
-    if (numericAmount === null || numericAmount < 0) return res.status(400).json({ success: false, message: "amount/fees must be a valid number" });
-
-    let finalHour = hour !== undefined ? safeNumber(hour) : null;
-    let finalMinute = minute !== undefined ? safeNumber(minute) : null;
-    let finalAmpm = ampm || null;
-
-    if (time && (finalHour === null || finalHour === undefined)) {
-      const parsed = parseTimeString(time);
-      if (!parsed) return res.status(400).json({ success: false, message: "time string couldn't be parsed" });
-      finalHour = parsed.hour;
-      finalMinute = parsed.minute;
-      finalAmpm = parsed.ampm;
-    }
-
-    if (finalHour === null || finalMinute === null || (finalAmpm !== "AM" && finalAmpm !== "PM")) {
-      return res.status(400).json({ success: false, message: "Time missing or invalid — provide time string or hour, minute and ampm." });
-    }
-
-    // DUPLICATE BOOKING CHECK
-    try {
-      const existing = await ServiceAppointment.findOne({
-        serviceId: String(serviceId),
-        createdBy: clerkUserId,
-        date: String(date),
-        hour: Number(finalHour),
-        minute: Number(finalMinute),
-        ampm: finalAmpm,
-        status: { $ne: "Canceled" },
-      }).lean();
-      if (existing) return res.status(409).json({ success: false, message: "You already have a booking for this service at the selected date and time." });
-    } catch (chkErr) {
-      console.warn("Duplicate booking check failed:", chkErr);
-    }
-
-    // Fetch service snapshot (non-fatal)
-    let svc = null;
-    try { svc = await Service.findById(serviceId).lean(); } catch (e) { console.warn("Service lookup failed:", e?.message || e); }
+    const svc = await Service.findById(serviceId).lean();
+    if (!svc) return res.status(404).json({ success: false, message: "Service not found" });
+    const numericAmount = Number(svc.price || 0);
+    const assignment = await getNextPathologistAssignment();
 
     let resolvedServiceName = serviceNameFromBody || (svc && (svc.name || svc.title)) || "Service";
     const svcImageUrlFromDB = svc && (String(svc.imageUrl || svc.image || svc.image?.url || svc.profileImage?.url || "").trim() || "");
@@ -155,18 +123,16 @@ export const CreateServiceAppointment = async (req,res) => {
       mobile: String(mobile).trim(),
       age: age ? Number(age) : undefined,
       gender: gender || "",
-      date: String(date),
-      hour: Number(finalHour),
-      minute: Number(finalMinute),
-      ampm: finalAmpm,
       fees: numericAmount,
       createdBy: clerkUserId,
       notes: notes || "",
+      requestedAt: new Date(),
+      ...(assignment || {}),
     };
 
     // Free appointment
     if (numericAmount === 0) {
-      const created = await ServiceAppointment.create({ ...base, status: "Pending", payment: { method: "Cash", status: "Pending", amount: 0, paidAt: new Date() } });
+      const created = await ServiceAppointment.create({ ...base, status: "Pending", payment: { method: "Cash", status: "Paid", amount: 0, paidAt: new Date() } });
       return res.status(201).json({ success: true, appointment: created });
     }
 
@@ -196,7 +162,7 @@ export const CreateServiceAppointment = async (req,res) => {
               currency: "inr",
               product_data: {
                 name: `Service: ${String(resolvedServiceName).slice(0, 60)}`,
-                description: `Appointment on ${base.date} ${base.hour}:${String(base.minute).padStart(2, "0")} ${base.ampm}`,
+                description: "24/7 service request with automatic pathologist assignment",
               },
               unit_amount: Math.round(numericAmount * 100),
             },
@@ -323,18 +289,21 @@ export const getServiceAppointment= async (req,res) => {
     const page = Math.max(1, parseInt(pageRaw, 10) || 1);
     const skip = (page - 1) * limit;
 
-    const filter = {};
+    const filter = req.actor?.role === "pathologist"
+      ? { assignedPathologist: req.actor.staffId }
+      : {};
     if (serviceId) filter.serviceId = serviceId;
     if (mobile) filter.mobile = mobile;
     if (status) filter.status = status;
     if (search) {
       const re = new RegExp(escapeRegExp(String(search).trim()), "i");
-      filter.$or = [{ patientName: re }, { mobile: re }, { serviceName: re }, { notes: re }];
+      filter.$or = [{ patientName: re }, { mobile: re }, { serviceName: re }, { notes: re }, { assignedPathologistName: re }];
     }
 
     const appointment = await ServiceAppointment.find(filter)
     .populate("serviceId", "name image imageUrl imageSmall")
-    .sort({createdAt:-1})
+    .populate("assignedPathologist", "name employeeId email imageUrl")
+    .sort({requestedAt:-1,createdAt:-1})
     .skip(skip).limit(limit).lean();
 
     const total= await ServiceAppointment.countDocuments(filter);
@@ -356,12 +325,17 @@ export const getServiceAppointment= async (req,res) => {
 export const getServiceAppointmentById= async (req,res) => {
     try {
         const {id} = req.params;
-        const appt = await ServiceAppointment.findById(id).lean();
+        const appt = await ServiceAppointment.findById(id)
+          .populate("assignedPathologist", "name employeeId email imageUrl")
+          .lean();
 
         if(!appt) return res.status(404).json({
             success:false,
             message:"not found the appointment"
         });
+        if (req.actor?.role === "pathologist" && String(appt.assignedPathologist?._id || appt.assignedPathologist || "") !== String(req.actor.staffId || "")) {
+          return res.status(404).json({ success: false, message: "Not found" });
+        }
         return res.json({success:true, data:appt});
     } catch (err) {
     console.error("getService AppointmentBy Id error:", err);
@@ -378,13 +352,37 @@ export const updateServiceAppointment= async (req,res) => {
       const body= req.body || {};
       const updates ={};
 
+      const existing = await ServiceAppointment.findById(id).select("assignedPathologist status fees payment").lean();
+      if (!existing) return res.status(404).json({ success: false, message: "Not found" });
+      const isPathologist = req.actor?.role === "pathologist";
+      if (isPathologist && String(existing.assignedPathologist || "") !== String(req.actor.staffId || "")) {
+        return res.status(404).json({ success: false, message: "Not found" });
+      }
+
 
     if (body.status !== undefined) {
       const status = String(body.status).trim();
       if (!SERVICE_APPOINTMENT_STATUSES.includes(status)) {
         return res.status(400).json({ success: false, message: "Invalid appointment status" });
       }
+      if (isPathologist && !["Pending", "Confirmed", "Completed"].includes(status)) {
+        return res.status(403).json({ success: false, message: "Pathologists cannot set this status" });
+      }
       updates.status = status;
+      if (status === "Completed" && existing.status !== "Completed") {
+        const cashDecision = evaluateCashPaymentOnCompletion(existing, body.cashPaymentReceived);
+        if (!cashDecision.ok) {
+          return res.status(400).json({ success: false, message: cashDecision.message });
+        }
+        if (cashDecision.requiresDecision) {
+          updates["payment.status"] = cashDecision.paymentStatus;
+          updates["payment.amount"] = cashDecision.amount;
+          updates["payment.paidAt"] = cashDecision.paidAt;
+          updates["payment.meta.cashReceived"] = cashDecision.cashPaymentReceived;
+          updates["payment.meta.cashConfirmedAt"] = cashDecision.confirmedAt;
+          updates["payment.meta.cashConfirmedBy"] = req.actor?.staffId || req.actor?.id || req.actor?.role || "staff";
+        }
+      }
     }
     if (body.notes !== undefined) {
       const notes = String(body.notes).trim();
@@ -393,8 +391,8 @@ export const updateServiceAppointment= async (req,res) => {
       }
       updates.notes = notes;
     }
-    if (body.payment !== undefined) updates.payment = body.payment;
-    if (body["payment.status"] !== undefined) {
+    if (!isPathologist && body.payment !== undefined) updates.payment = body.payment;
+    if (!isPathologist && body["payment.status"] !== undefined) {
       const paymentStatus = String(body["payment.status"]).trim();
       if (!PAYMENT_STATUSES.includes(paymentStatus)) {
         return res.status(400).json({ success: false, message: "Invalid payment status" });
@@ -403,7 +401,7 @@ export const updateServiceAppointment= async (req,res) => {
       if (paymentStatus === "Paid") updates["payment.paidAt"] = new Date();
     }
 
-    if (body.rescheduledTo) {
+    if (!isPathologist && body.rescheduledTo) {
       const { date, time } = body.rescheduledTo || {};
       updates.rescheduledTo = {};
       if (date) {
@@ -486,6 +484,26 @@ export const cancelServiceAppointment= async (req,res) => {
 
 export const getServiceAppointmentStats= async (req,res) => {
   try {
+    if (req.actor?.role === "pathologist") {
+      const filter = { assignedPathologist: req.actor.staffId };
+      const [totalAppointments, pending, confirmed, rescheduled, completedRows, canceled] = await Promise.all([
+        ServiceAppointment.countDocuments(filter),
+        ServiceAppointment.countDocuments({ ...filter, status: "Pending" }),
+        ServiceAppointment.countDocuments({ ...filter, status: "Confirmed" }),
+        ServiceAppointment.countDocuments({ ...filter, status: "Rescheduled" }),
+        ServiceAppointment.find({ ...filter, status: "Completed", "payment.status": "Paid" }).select("fees").lean(),
+        ServiceAppointment.countDocuments({ ...filter, status: "Canceled" }),
+      ]);
+      const completed = completedRows.length;
+      const earning = completedRows.reduce((sum, item) => sum + Number(item.fees || 0), 0);
+      return res.json({
+        success: true,
+        services: [],
+        totalServices: 0,
+        summary: { totalAppointments, pending, confirmed, rescheduled, completed, canceled, earning },
+      });
+    }
+
     const services = await Service.aggregate([
       {
         $lookup: { from: "serviceappointments", localField: "_id", foreignField: "serviceId", as: "appointments" },
@@ -501,7 +519,13 @@ export const getServiceAppointmentStats= async (req,res) => {
           earning: {
             $sum: {
               $map: {
-                input: { $filter: { input: "$appointments", as: "a", cond: { $eq: ["$$a.status", "Completed"] } } },
+                input: {
+                  $filter: {
+                    input: "$appointments",
+                    as: "a",
+                    cond: { $and: [{ $eq: ["$$a.status", "Completed"] }, { $eq: ["$$a.payment.status", "Paid"] }] },
+                  },
+                },
                 as: "completedAppointment",
                 in: { $ifNull: ["$$completedAppointment.fees", "$price"] },
               },
@@ -509,7 +533,7 @@ export const getServiceAppointmentStats= async (req,res) => {
           },
         },
       },
-      { $project: { name: 1, price: 1, available: 1, image: "$imageUrl", totalAppointments: 1, pending: 1, confirmed: 1, rescheduled: 1, completed: 1, canceled: 1, earning: 1 } },
+      { $project: { name: 1, price: 1, available: { $literal: true }, image: "$imageUrl", totalAppointments: 1, pending: 1, confirmed: 1, rescheduled: 1, completed: 1, canceled: 1, earning: 1 } },
       { $sort: { totalAppointments: -1, name: 1 } },
     ]);
     const summary = services.reduce((total, service) => ({

@@ -24,7 +24,6 @@ import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { formatCurrency, getId } from '../lib/format'
 
-const FILTERS = ['All', 'Available', 'Unavailable']
 const PAGE_SIZE = 9
 
 export default function ServicesList() {
@@ -36,7 +35,6 @@ export default function ServicesList() {
   const [notice, setNotice] = useState('')
   const [lastUpdated, setLastUpdated] = useState(null)
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState('All')
   const [sort, setSort] = useState('newest')
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const [expandedId, setExpandedId] = useState('')
@@ -91,21 +89,18 @@ export default function ServicesList() {
   const services = useMemo(() => mergeServices(definitions, stats), [definitions, stats])
 
   const summary = useMemo(() => services.reduce((total, service) => ({
-    available: total.available + (isAvailable(service) ? 1 : 0),
     bookings: total.bookings + asNumber(service.totalAppointments),
     completed: total.completed + asNumber(service.completed),
     revenue: total.revenue + asNumber(service.earning),
-  }), { available: 0, bookings: 0, completed: 0, revenue: 0 }), [services])
+  }), { bookings: 0, completed: 0, revenue: 0 }), [services])
 
   const filteredServices = useMemo(() => {
     const keyword = query.trim().toLowerCase()
     const result = services.filter((service) => {
-      const matchesFilter = filter === 'All'
-        || (filter === 'Available' ? isAvailable(service) : !isAvailable(service))
       const matchesSearch = !keyword || [service.name, service.shortDescription, service.about]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(keyword))
-      return matchesFilter && matchesSearch
+      return matchesSearch
     })
 
     return [...result].sort((first, second) => {
@@ -115,13 +110,12 @@ export default function ServicesList() {
       if (sort === 'revenue') return asNumber(second.earning) - asNumber(first.earning)
       return new Date(second.createdAt || 0) - new Date(first.createdAt || 0)
     })
-  }, [filter, query, services, sort])
+  }, [query, services, sort])
 
   const visibleServices = filteredServices.slice(0, visibleCount)
 
   function resetView() {
     setQuery('')
-    setFilter('All')
     setSort('newest')
     setVisibleCount(PAGE_SIZE)
   }
@@ -207,10 +201,10 @@ export default function ServicesList() {
         )}
 
         <section aria-label="Service totals" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard icon={Stethoscope} label="Total services" value={services.length} detail={`${summary.available} currently available`} tone="sky" />
-          <SummaryCard icon={CircleCheck} label="Available" value={summary.available} detail={`${services.length - summary.available} unavailable`} tone="emerald" />
-          <SummaryCard icon={CalendarClock} label="Total bookings" value={summary.bookings} detail={`${summary.completed} completed`} tone="violet" />
-          <SummaryCard icon={WalletCards} label="Completed revenue" value={formatCurrency(summary.revenue)} detail="From completed bookings" tone="amber" />
+          <SummaryCard icon={Stethoscope} label="Total services" value={services.length} detail="All open around the clock" tone="sky" />
+          <SummaryCard icon={CircleCheck} label="Availability" value="24/7" detail="No schedule required" tone="emerald" />
+          <SummaryCard icon={CalendarClock} label="Total requests" value={summary.bookings} detail={`${summary.completed} completed`} tone="violet" />
+          <SummaryCard icon={WalletCards} label="Service revenue" value={formatCurrency(summary.revenue)} detail="Completed requests marked paid" tone="amber" />
         </section>
 
         <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -252,26 +246,13 @@ export default function ServicesList() {
               </div>
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              {FILTERS.map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => { setFilter(value); setVisibleCount(PAGE_SIZE) }}
-                  aria-pressed={filter === value}
-                  className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition ${filter === value ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800'}`}
-                >
-                  {value}
-                </button>
-              ))}
-            </div>
           </div>
 
           <div className="p-4 sm:p-5">
             {loading ? (
               <ServiceSkeleton />
             ) : visibleServices.length === 0 ? (
-              <EmptyState filtered={Boolean(query || filter !== 'All')} onClear={resetView} />
+              <EmptyState filtered={Boolean(query)} onClear={resetView} />
             ) : (
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {visibleServices.map((service) => {
@@ -323,14 +304,13 @@ export default function ServicesList() {
 }
 
 function ServiceCard({ service, expanded, onToggle, onEdit, onDelete }) {
-  const schedule = serviceSchedule(service)
   const manageable = service._hasProfile !== false
 
   return (
     <article className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white transition hover:border-emerald-200 hover:shadow-md">
       <div className="relative aspect-[16/7] overflow-hidden bg-slate-100">
         <ServiceImage service={service} />
-        <div className="absolute left-3 top-3"><AvailabilityBadge available={isAvailable(service)} /></div>
+        <div className="absolute left-3 top-3"><AvailabilityBadge /></div>
         <div className="absolute bottom-3 right-3 rounded-xl bg-slate-950/80 px-3 py-1.5 text-sm font-bold text-white backdrop-blur-sm">{formatCurrency(service.price)}</div>
       </div>
 
@@ -351,23 +331,7 @@ function ServiceCard({ service, expanded, onToggle, onEdit, onDelete }) {
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">About</p>
             <p className="mt-1.5 text-sm leading-6 text-slate-600">{service.about || 'No detailed description has been added.'}</p>
 
-            <div className="mt-4">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Schedule</p>
-                <span className="text-xs font-semibold text-slate-500">{schedule.totalSlots} slots</span>
-              </div>
-              {schedule.entries.length ? (
-                <div className="mt-2 space-y-2">
-                  {schedule.entries.slice(0, 3).map(([date, slots]) => (
-                    <div key={date} className="rounded-xl border border-slate-100 bg-slate-50 p-2.5">
-                      <p className="text-xs font-bold text-slate-700">{formatDate(date)}</p>
-                      <p className="mt-1 text-xs leading-5 text-slate-500">{slots.join(', ')}</p>
-                    </div>
-                  ))}
-                  {schedule.entries.length > 3 && <p className="text-xs font-semibold text-slate-400">+{schedule.entries.length - 3} more dates</p>}
-                </div>
-              ) : <p className="mt-2 text-sm text-slate-500">No booking slots configured.</p>}
-            </div>
+            <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-3"><p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Availability</p><p className="mt-1 text-sm font-semibold text-emerald-900">Open 24/7 · No schedule required</p></div>
 
             <div className="mt-4">
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Patient instructions</p>
@@ -398,13 +362,9 @@ function EditServiceModal({ service, saving, onClose, onSave }) {
     shortDescription: service.shortDescription || '',
     about: service.about || '',
     price: service.price ?? '',
-    availability: isAvailable(service) ? 'Available' : 'Unavailable',
     imageUrl: service.imageUrl || service.image || '',
   })
   const [instructions, setInstructions] = useState(() => makeInstructionRows(service.instructions))
-  const [schedule, setSchedule] = useState(() => cleanSchedule(service.slots))
-  const [slotDate, setSlotDate] = useState('')
-  const [slotTime, setSlotTime] = useState('')
   const [image, setImage] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
   const [errors, setErrors] = useState({})
@@ -460,34 +420,6 @@ function EditServiceModal({ service, saving, onClose, onSave }) {
     })
   }
 
-  function addSlot() {
-    if (!slotDate || !slotTime) {
-      setErrors((current) => ({ ...current, schedule: 'Choose both a date and a time.' }))
-      return
-    }
-    const value = toTwelveHourTime(slotTime)
-    if ((schedule[slotDate] || []).includes(value)) {
-      setErrors((current) => ({ ...current, schedule: 'That time is already added for this date.' }))
-      return
-    }
-    setSchedule((current) => ({
-      ...current,
-      [slotDate]: [...(current[slotDate] || []), value].sort(compareTimeSlots),
-    }))
-    setSlotTime('')
-    setErrors((current) => ({ ...current, schedule: '' }))
-  }
-
-  function removeSlot(date, slot) {
-    setSchedule((current) => {
-      const remaining = current[date].filter((value) => value !== slot)
-      const next = { ...current }
-      if (remaining.length) next[date] = remaining
-      else delete next[date]
-      return next
-    })
-  }
-
   async function submit(event) {
     event.preventDefault()
     const nextErrors = validateEditForm(form, image)
@@ -504,10 +436,8 @@ function EditServiceModal({ service, saving, onClose, onSave }) {
     formData.set('shortDescription', form.shortDescription.trim())
     formData.set('about', form.about.trim())
     formData.set('price', String(Number(form.price)))
-    formData.set('availability', form.availability)
     formData.set('imageUrl', form.imageUrl.trim())
     formData.set('instructions', JSON.stringify([...new Set(instructions.map((row) => row.text.trim()).filter(Boolean))]))
-    formData.set('slots', JSON.stringify(schedule))
     if (image) formData.set('image', image)
 
     const result = await onSave(formData)
@@ -538,13 +468,6 @@ function EditServiceModal({ service, saving, onClose, onSave }) {
               </div>
               <Field name="shortDescription" label="Short description" value={form.shortDescription} onChange={changeField} error={errors.shortDescription} maxLength={160} hint={`${form.shortDescription.length}/160`} />
               <TextArea name="about" label="About this service" value={form.about} onChange={changeField} rows={5} />
-              <label className="block">
-                <span className="mb-2 block text-sm font-bold text-slate-700">Booking availability</span>
-                <select name="availability" value={form.availability} onChange={changeField} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50">
-                  <option>Available</option>
-                  <option>Unavailable</option>
-                </select>
-              </label>
 
               <section className="rounded-2xl border border-slate-200 p-4">
                 <div className="flex items-start justify-between gap-4">
@@ -575,30 +498,9 @@ function EditServiceModal({ service, saving, onClose, onSave }) {
                 <Field className="mt-4" name="imageUrl" label="Or image URL" type="url" value={form.imageUrl} onChange={changeField} error={errors.imageUrl} placeholder="https://example.com/service.jpg" />
               </section>
 
-              <section className="rounded-2xl border border-slate-200 p-4">
-                <div className="flex items-start gap-3">
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-700"><CalendarClock size={17} /></span>
-                  <div><h3 className="text-sm font-bold text-slate-900">Booking schedule</h3><p className="mt-0.5 text-xs text-slate-500">Add or remove patient-facing time slots.</p></div>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <input type="date" min={todayKey()} value={slotDate} onChange={(event) => setSlotDate(event.target.value)} aria-label="Slot date" className="h-10 min-w-0 rounded-xl border border-slate-200 px-2 text-sm outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50" />
-                  <input type="time" value={slotTime} onChange={(event) => setSlotTime(event.target.value)} aria-label="Slot time" className="h-10 min-w-0 rounded-xl border border-slate-200 px-2 text-sm outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50" />
-                </div>
-                <button type="button" onClick={addSlot} className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-slate-900 text-sm font-bold text-white hover:bg-slate-800"><Plus size={15} /> Add time slot</button>
-                {errors.schedule && <p className="mt-2 text-xs font-semibold text-rose-600">{errors.schedule}</p>}
-                <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
-                  {Object.entries(schedule).sort(([first], [second]) => first.localeCompare(second)).map(([date, slots]) => (
-                    <div key={date} className="rounded-xl bg-slate-50 p-2.5">
-                      <p className="text-xs font-bold text-slate-700">{formatDate(date)}</p>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {slots.map((slot) => (
-                          <button key={slot} type="button" onClick={() => removeSlot(date, slot)} title="Remove this slot" className="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 hover:text-rose-600 hover:ring-rose-200">{slot}<X size={11} /></button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                  {Object.keys(schedule).length === 0 && <p className="rounded-xl bg-slate-50 px-3 py-4 text-center text-xs text-slate-500">No time slots added.</p>}
-                </div>
+              <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <h3 className="text-sm font-bold text-emerald-900">24/7 service requests</h3>
+                <p className="mt-1 text-xs leading-5 text-emerald-800">Patients can request every active service at any time. Requests are assigned automatically to active pathologists in serial order.</p>
               </section>
             </div>
           </div>
@@ -666,8 +568,8 @@ function Metric({ label, value }) {
   return <div className="min-w-0 px-1"><p className="truncate text-sm font-bold text-slate-900">{value}</p><p className="mt-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p></div>
 }
 
-function AvailabilityBadge({ available }) {
-  return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold shadow-sm ring-1 ${available ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-slate-100 text-slate-600 ring-slate-200'}`}><span className={`h-1.5 w-1.5 rounded-full ${available ? 'bg-emerald-500' : 'bg-slate-400'}`} />{available ? 'Available' : 'Unavailable'}</span>
+function AvailabilityBadge() {
+  return <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700 shadow-sm ring-1 ring-emerald-200"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Open 24/7</span>
 }
 
 function ServiceImage({ service }) {
@@ -721,7 +623,7 @@ function ServiceSkeleton() {
 function EmptyState({ filtered, onClear }) {
   return (
     <div className="grid min-h-72 place-items-center px-5 py-12 text-center">
-      <div><span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-emerald-50 text-emerald-600">{filtered ? <Search size={24} /> : <ClipboardList size={24} />}</span><h3 className="mt-4 text-lg font-bold text-slate-900">{filtered ? 'No matching services' : 'No services yet'}</h3><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-500">{filtered ? 'Try a different search or availability filter.' : 'Create the first service to make it available for patients.'}</p>{filtered ? <button type="button" onClick={onClear} className="mt-4 text-sm font-bold text-emerald-700 hover:text-emerald-800">Clear filters</button> : <Link to="/add-service" className="mt-4 inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white"><Plus size={15} /> Add service</Link>}</div>
+      <div><span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-emerald-50 text-emerald-600">{filtered ? <Search size={24} /> : <ClipboardList size={24} />}</span><h3 className="mt-4 text-lg font-bold text-slate-900">{filtered ? 'No matching services' : 'No services yet'}</h3><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-500">{filtered ? 'Try a different search.' : 'Create the first 24/7 service for patients.'}</p>{filtered ? <button type="button" onClick={onClear} className="mt-4 text-sm font-bold text-emerald-700 hover:text-emerald-800">Clear search</button> : <Link to="/add-service" className="mt-4 inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white"><Plus size={15} /> Add service</Link>}</div>
     </div>
   )
 }
@@ -738,19 +640,6 @@ function mergeServices(definitions, stats) {
     if (!known.has(getId(service))) merged.push({ ...service, _hasProfile: false })
   })
   return merged
-}
-
-function serviceSchedule(service) {
-  const entries = Object.entries(cleanSchedule(service.slots)).sort(([first], [second]) => first.localeCompare(second))
-  return { entries, totalSlots: entries.reduce((total, [, slots]) => total + slots.length, 0) }
-}
-
-function cleanSchedule(slots) {
-  if (!slots || typeof slots !== 'object' || Array.isArray(slots)) return {}
-  return Object.fromEntries(Object.entries(slots)
-    .filter(([date, values]) => /^\d{4}-\d{2}-\d{2}$/.test(date) && Array.isArray(values))
-    .map(([date, values]) => [date, [...new Set(values.map(String).map((value) => value.trim()).filter(Boolean))].sort(compareTimeSlots)])
-    .filter(([, values]) => values.length))
 }
 
 function makeInstructionRows(values) {
@@ -784,11 +673,6 @@ function isHttpUrl(value) {
   }
 }
 
-function isAvailable(service) {
-  if (typeof service.available === 'boolean') return service.available
-  return String(service.availability || service.available || 'available').toLowerCase() !== 'unavailable'
-}
-
 function serviceName(service) {
   return service?.name || service?.serviceName || 'Untitled service'
 }
@@ -802,38 +686,6 @@ function formatCompactCurrency(value) {
   const amount = asNumber(value)
   if (amount < 1000) return `৳${amount.toLocaleString('en-BD')}`
   return `৳${new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(amount)}`
-}
-
-function formatDate(value) {
-  const date = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString('en-BD', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
-}
-
-function todayKey() {
-  const date = new Date()
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function toTwelveHourTime(value) {
-  const [rawHour, minute] = value.split(':')
-  const hour = Number(rawHour)
-  const suffix = hour >= 12 ? 'PM' : 'AM'
-  return `${String(hour % 12 || 12).padStart(2, '0')}:${minute} ${suffix}`
-}
-
-function compareTimeSlots(first, second) {
-  return timeSlotMinutes(first) - timeSlotMinutes(second)
-}
-
-function timeSlotMinutes(value) {
-  const [time, suffix] = String(value).split(' ')
-  const [rawHour, minute] = time.split(':').map(Number)
-  if (!Number.isFinite(rawHour) || !Number.isFinite(minute)) return Number.MAX_SAFE_INTEGER
-  return (rawHour % 12 + (suffix === 'PM' ? 12 : 0)) * 60 + minute
 }
 
 function revokePreviewUrl(ref) {

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity, ArrowRight, Banknote, Bell, CalendarCheck, CalendarDays, Check, CheckCircle2,
-  ChevronRight, CircleUserRound, ClipboardList, Clock3, Edit3, LayoutDashboard, LoaderCircle,
+  Camera, ChevronRight, CircleUserRound, ClipboardList, Clock3, Edit3, LayoutDashboard, LoaderCircle,
   LogOut, Menu, MessageSquareText, Phone, Plus, RefreshCw, Save, Search, ShieldCheck, FlaskConical,
   Sparkles, UserRound, UsersRound, X, XCircle,
 } from 'lucide-react'
@@ -10,7 +10,7 @@ import logo from '../assets/logo.png'
 import { ErrorState, ImageWithFallback, LoadingPanel } from '../components/PatientUi'
 import { patientApi } from '../lib/api'
 import { clearDoctorSession, readDoctorSession, saveDoctorSession } from '../lib/doctorSession'
-import { formatAppointmentTime, formatCurrency, formatDate, getId, isAvailable, localDateKey, statusClass } from '../lib/format'
+import { formatAppointmentTime, formatCurrency, formatDate, getId, isAvailable, localDateKey, normalizeWeeklySchedule, statusClass, WEEK_DAYS } from '../lib/format'
 import '../doctorPortal.css'
 
 const navItems = [
@@ -35,7 +35,9 @@ export default function DoctorPortal() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [scheduleDraft, setScheduleDraft] = useState(() => normalizeSchedule(session?.doctor?.schedule))
+  const [cashPrompt, setCashPrompt] = useState(null)
+  const [cashPromptBusy, setCashPromptBusy] = useState(false)
+  const [scheduleDraft, setScheduleDraft] = useState(() => normalizeWeeklySchedule(session?.doctor?.schedule))
   const [profileDraft, setProfileDraft] = useState(() => profileFromDoctor(session?.doctor))
 
   const logout = useCallback(() => {
@@ -58,7 +60,7 @@ export default function DoctorPortal() {
       setDoctor(profile)
       setAppointments(appointmentPayload.appointments || [])
       setLabTests(laboratory)
-      setScheduleDraft(normalizeSchedule(profile.schedule))
+      setScheduleDraft(normalizeWeeklySchedule(profile.schedule))
       setProfileDraft(profileFromDoctor(profile))
       const nextSession = { token: session.token, doctor: profile }
       saveDoctorSession(nextSession)
@@ -88,7 +90,7 @@ export default function DoctorPortal() {
 
   function syncDoctor(nextDoctor) {
     setDoctor(nextDoctor)
-    setScheduleDraft(normalizeSchedule(nextDoctor.schedule))
+    setScheduleDraft(normalizeWeeklySchedule(nextDoctor.schedule))
     setProfileDraft(profileFromDoctor(nextDoctor))
     const nextSession = { token: session.token, doctor: nextDoctor }
     saveDoctorSession(nextSession)
@@ -104,24 +106,65 @@ export default function DoctorPortal() {
     }
   }
 
-  async function updateAppointment(id, changes, successMessage) {
+  async function saveAppointmentUpdate(id, changes, successMessage) {
     const updated = await patientApi.updateDoctorPortalAppointment(id, changes, session.token)
     setAppointments((current) => current.map((item) => getId(item) === getId(updated) ? updated : item))
     setNotice({ tone: 'success', text: successMessage || 'Appointment updated.' })
     return updated
   }
 
+  function updateAppointment(id, changes, successMessage) {
+    const appointment = appointments.find((item) => String(getId(item)) === String(id))
+    if (changes?.status === 'Completed' && requiresCashPaymentDecision(appointment) && typeof changes.cashPaymentReceived !== 'boolean') {
+      return new Promise((resolve, reject) => {
+        setCashPrompt({ appointment, changes, successMessage, resolve, reject })
+      })
+    }
+    return saveAppointmentUpdate(id, changes, successMessage)
+  }
+
+  function closeCashPrompt() {
+    if (cashPromptBusy) return
+    cashPrompt?.resolve({ cancelled: true })
+    setCashPrompt(null)
+  }
+
+  async function confirmCashCompletion(cashPaymentReceived) {
+    if (!cashPrompt) return
+    const prompt = cashPrompt
+    setCashPromptBusy(true)
+    try {
+      const updated = await saveAppointmentUpdate(
+        getId(prompt.appointment),
+        { ...prompt.changes, cashPaymentReceived },
+        prompt.successMessage,
+      )
+      prompt.resolve(updated)
+    } catch (completionError) {
+      prompt.reject(completionError)
+    } finally {
+      setCashPromptBusy(false)
+      setCashPrompt(null)
+    }
+  }
+
   async function saveSchedule() {
     const updated = await patientApi.updateDoctorProfile(getId(doctor), { schedule: scheduleDraft }, session.token)
     syncDoctor(updated)
-    setNotice({ tone: 'success', text: 'Your appointment schedule has been published.' })
+    setNotice({ tone: 'success', text: 'Your recurring weekly schedule has been published.' })
   }
 
-  async function saveProfile() {
-    const body = { ...profileDraft, fee: Number(profileDraft.fee || 0) }
+  async function saveProfile(imageFile) {
+    let body = { ...profileDraft, fee: Number(profileDraft.fee || 0) }
+    if (imageFile) {
+      body = new FormData()
+      profileFields.forEach((field) => body.append(field, field === 'fee' ? String(Number(profileDraft.fee || 0)) : profileDraft[field] || ''))
+      body.append('image', imageFile)
+    }
     const updated = await patientApi.updateDoctorProfile(getId(doctor), body, session.token)
     syncDoctor(updated)
     setNotice({ tone: 'success', text: 'Your professional profile has been updated.' })
+    return updated
   }
 
   async function orderLabTest(body) {
@@ -169,6 +212,15 @@ export default function DoctorPortal() {
           )}
         </main>
       </div>
+      {cashPrompt && (
+        <CashPaymentModal
+          key={getId(cashPrompt.appointment)}
+          appointment={cashPrompt.appointment}
+          busy={cashPromptBusy}
+          onClose={closeCashPrompt}
+          onConfirm={confirmCashCompletion}
+        />
+      )}
     </div>
   )
 }
@@ -178,7 +230,7 @@ function OverviewView({ doctor, appointments, onUpdate }) {
   const todaysAppointments = appointments.filter((item) => item.date === today && item.status !== 'Canceled')
   const upcoming = appointments.filter((item) => item.date >= today && !['Completed', 'Canceled'].includes(item.status))
   const completed = appointments.filter((item) => item.status === 'Completed')
-  const paidTotal = appointments.filter((item) => item.payment?.status === 'Paid').reduce((total, item) => total + Number(item.fees || 0), 0)
+  const paidTotal = appointments.filter((item) => item.status === 'Completed' && item.payment?.status === 'Paid').reduce((total, item) => total + Number(item.fees || 0), 0)
   const nextAppointment = [...upcoming].sort(sortAppointments)[0]
   const firstName = String(doctor?.name || 'Doctor').replace(/^Dr\.?\s*/i, '').split(' ')[0]
 
@@ -192,7 +244,7 @@ function OverviewView({ doctor, appointments, onUpdate }) {
       <StatCard icon={CalendarCheck} label="Today" value={todaysAppointments.length} detail="Scheduled visits" tone="green" />
       <StatCard icon={Clock3} label="Upcoming" value={upcoming.length} detail="Active appointments" tone="blue" />
       <StatCard icon={UsersRound} label="Completed" value={completed.length} detail="Patient consultations" tone="violet" />
-      <StatCard icon={Banknote} label="Paid bookings" value={formatCurrency(paidTotal)} detail="Recorded payments" tone="amber" compact />
+      <StatCard icon={Banknote} label="Visit revenue" value={formatCurrency(paidTotal)} detail="Completed and paid" tone="amber" compact />
     </section>
 
     <div className="doctor-overview-grid">
@@ -266,7 +318,7 @@ function AppointmentManager({ item, onClose, onUpdate }) {
   async function save(changes, message) {
     setSaving(true)
     setError('')
-    try { await onUpdate(getId(item), changes, message); if (changes.status) onClose() }
+    try { const result = await onUpdate(getId(item), changes, message); if (changes.status && !result?.cancelled) onClose() }
     catch (saveError) { setError(saveError.message || 'Unable to update this appointment.') }
     finally { setSaving(false) }
   }
@@ -280,6 +332,31 @@ function AppointmentManager({ item, onClose, onUpdate }) {
     {!terminal && <section className="doctor-reschedule-box"><div><span><CalendarDays size={17} />Reschedule appointment</span><small>Choose a future date and time.</small></div><div><label className="doctor-form-field"><span>New date</span><input type="date" min={localDateKey(new Date())} value={date} onChange={(event) => setDate(event.target.value)} /></label><label className="doctor-form-field"><span>New time</span><input type="time" value={time} onChange={(event) => setTime(event.target.value)} /></label></div><button type="button" disabled={saving || !date || !time} onClick={() => save({ date, time: toTwelveHour(time), doctorNotes: notes }, 'Appointment rescheduled successfully.')}><RefreshCw size={16} /> Save new time</button></section>}
     {error && <p className="doctor-inline-error"><XCircle size={16} />{error}</p>}
   </div><footer>{!terminal && <><button type="button" disabled={saving} onClick={() => save({ status: item.status === 'Pending' ? 'Confirmed' : 'Completed', doctorNotes: notes }, item.status === 'Pending' ? 'Appointment confirmed.' : 'Appointment completed.')} className="doctor-drawer__primary"><CheckCircle2 size={16} />{item.status === 'Pending' ? 'Confirm appointment' : 'Mark completed'}</button><button type="button" disabled={saving} onClick={() => save({ status: 'Canceled', doctorNotes: notes }, 'Appointment canceled.')} className="doctor-drawer__danger">Cancel appointment</button></>}</footer></div></div>
+}
+
+function CashPaymentModal({ appointment, busy, onClose, onConfirm }) {
+  const [cashPaymentReceived, setCashPaymentReceived] = useState(null)
+
+  return (
+    <div className="fixed inset-0 z-[100] grid place-items-center px-4 py-6" role="dialog" aria-modal="true" aria-labelledby="doctor-cash-payment-title">
+      <button type="button" onClick={onClose} disabled={busy} aria-label="Close cash payment confirmation" className="absolute inset-0 bg-slate-950/55 backdrop-blur-sm disabled:cursor-wait" />
+      <section className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+        <span className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><Banknote size={21} /></span>
+        <h2 id="doctor-cash-payment-title" className="mt-4 text-xl font-bold text-slate-950">Confirm cash payment</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-500">Before completing {appointment.patientName}’s visit, confirm whether the consultation fee was received in cash.</p>
+        <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600"><strong className="text-slate-900">{formatCurrency(appointment.fees)}</strong> consultation fee</div>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button type="button" aria-pressed={cashPaymentReceived === true} onClick={() => setCashPaymentReceived(true)} disabled={busy} className={`rounded-xl border px-3 py-3 text-sm font-bold transition ${cashPaymentReceived === true ? 'border-emerald-500 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-100' : 'border-slate-200 text-slate-700 hover:border-emerald-300'}`}>Yes, received</button>
+          <button type="button" aria-pressed={cashPaymentReceived === false} onClick={() => setCashPaymentReceived(false)} disabled={busy} className={`rounded-xl border px-3 py-3 text-sm font-bold transition ${cashPaymentReceived === false ? 'border-amber-500 bg-amber-50 text-amber-800 ring-2 ring-amber-100' : 'border-slate-200 text-slate-700 hover:border-amber-300'}`}>No, unpaid</button>
+        </div>
+        <p className="mt-3 text-xs leading-5 text-slate-500">Unpaid visits can still be completed, but they will not be added to admin revenue.</p>
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button type="button" onClick={onClose} disabled={busy} className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Go back</button>
+          <button type="button" onClick={() => onConfirm(cashPaymentReceived)} disabled={busy || cashPaymentReceived === null} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">{busy && <LoaderCircle size={16} className="animate-spin" />}{busy ? 'Saving...' : 'Complete visit'}</button>
+        </div>
+      </section>
+    </div>
+  )
 }
 
 function LaboratoryView({ appointments, tests, onOrder }) {
@@ -298,19 +375,19 @@ function LaboratoryView({ appointments, tests, onOrder }) {
 }
 
 function ScheduleView({ doctor, draft, setDraft, onSave, onToggleAvailability }) {
-  const [date, setDate] = useState('')
+  const [day, setDay] = useState(() => ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][new Date().getDay()])
   const [time, setTime] = useState('')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
-  const today = localDateKey(new Date())
-  const days = Object.entries(draft).sort(([first], [second]) => first.localeCompare(second))
-  const upcomingDays = days.filter(([value]) => value >= today)
-  const expiredCount = days.length - upcomingDays.length
+  const publishedDays = WEEK_DAYS.map((item) => ({ ...item, slots: draft[item.key] || [] }))
+  const scheduledDays = publishedDays.filter((item) => item.slots.length)
+  const totalSlots = scheduledDays.reduce((total, item) => total + item.slots.length, 0)
 
   function addSlot() {
-    if (!date || !time) { setMessage('Choose both a date and time.'); return }
+    if (!day || !time) { setMessage('Choose both a weekday and time.'); return }
     const value = toTwelveHour(time)
-    setDraft((current) => ({ ...current, [date]: [...new Set([...(current[date] || []), value])].sort(sortTimes) }))
+    if ((draft[day] || []).includes(value)) { setMessage('That time is already scheduled for this weekday.'); return }
+    setDraft((current) => ({ ...current, [day]: [...new Set([...(current[day] || []), value])].sort(sortTimes) }))
     setTime('')
     setMessage('')
   }
@@ -319,6 +396,14 @@ function ScheduleView({ doctor, draft, setDraft, onSave, onToggleAvailability })
     setDraft((current) => {
       const next = { ...current, [day]: current[day].filter((value) => value !== slot) }
       if (!next[day].length) delete next[day]
+      return next
+    })
+  }
+
+  function clearDay(dayKey) {
+    setDraft((current) => {
+      const next = { ...current }
+      delete next[dayKey]
       return next
     })
   }
@@ -332,13 +417,13 @@ function ScheduleView({ doctor, draft, setDraft, onSave, onToggleAvailability })
   }
 
   return <section className="doctor-view">
-    <ViewHeading kicker="Practice settings" title="Schedule & availability" text="Publish future booking times and control whether patients can request new appointments." />
+    <ViewHeading kicker="Practice settings" title="Weekly schedule & availability" text="Set each weekday once. The same timetable repeats automatically every week." />
     <div className="doctor-schedule-layout"><div>
-      <section className="doctor-panel doctor-schedule-builder"><PanelHeading icon={Plus} title="Add appointment time" text="Create a future slot for patients to book." /><div><label className="doctor-form-field"><span>Date</span><input type="date" min={today} value={date} onChange={(event) => setDate(event.target.value)} /></label><label className="doctor-form-field"><span>Time</span><input type="time" value={time} onChange={(event) => setTime(event.target.value)} /></label><button type="button" onClick={addSlot}><Plus size={17} /> Add slot</button></div>{message && <p className="doctor-inline-error">{message}</p>}</section>
-      <section className="doctor-panel doctor-published-schedule"><PanelHeading icon={CalendarDays} title="Published availability" text={`${upcomingDays.length} upcoming ${upcomingDays.length === 1 ? 'date' : 'dates'} available to patients.`} action={expiredCount > 0 && <button type="button" onClick={() => setDraft(Object.fromEntries(upcomingDays))}>Remove {expiredCount} expired</button>} />{upcomingDays.length ? <div>{upcomingDays.map(([day, slots]) => <article key={day}><header><div><span>{formatDate(day, { short: true })}</span><strong>{formatDate(day)}</strong></div><small>{slots.length} {slots.length === 1 ? 'slot' : 'slots'}</small></header><div>{slots.map((slot) => <span key={slot}><Clock3 size={14} />{slot}<button type="button" onClick={() => removeSlot(day, slot)} aria-label={`Remove ${slot}`}><X size={13} /></button></span>)}</div></article>)}</div> : <CompactEmpty icon={CalendarDays} title="No upcoming availability" text="Add a future date and time above, then publish your schedule." />}</section>
+      <section className="doctor-panel doctor-schedule-builder"><PanelHeading icon={Plus} title="Add recurring appointment time" text="Choose a weekday and time. It will repeat every week until you remove it." /><div><label className="doctor-form-field"><span>Weekday</span><select value={day} onChange={(event) => { setDay(event.target.value); setMessage('') }}>{WEEK_DAYS.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label><label className="doctor-form-field"><span>Time</span><input type="time" value={time} onChange={(event) => { setTime(event.target.value); setMessage('') }} /></label><button type="button" onClick={addSlot}><Plus size={17} /> Add weekly slot</button></div>{message && <p className="doctor-inline-error">{message}</p>}</section>
+      <section className="doctor-panel doctor-published-schedule"><PanelHeading icon={CalendarDays} title="Recurring weekly timetable" text={`${scheduledDays.length} working ${scheduledDays.length === 1 ? 'day' : 'days'} and ${totalSlots} appointment ${totalSlots === 1 ? 'time' : 'times'} each week.`} /><div>{publishedDays.map(({ key, label, slots }) => <article key={key} className={slots.length ? '' : 'is-empty'}><header><div><span>Every week</span><strong>{label}</strong></div><div className="doctor-day-actions"><small>{slots.length ? `${slots.length} ${slots.length === 1 ? 'slot' : 'slots'}` : 'Not scheduled'}</small>{slots.length > 0 && <button type="button" onClick={() => clearDay(key)}>Cancel day</button>}</div></header>{slots.length > 0 ? <div>{slots.map((slot) => <span key={slot}><Clock3 size={14} />{slot}<button type="button" onClick={() => removeSlot(key, slot)} aria-label={`Cancel ${slot} every ${label}`}><X size={13} /></button></span>)}</div> : <p className="doctor-day-off">No recurring appointments</p>}</article>)}</div></section>
     </div><aside>
-      <section className={`doctor-panel doctor-booking-status ${isAvailable(doctor) ? 'is-online' : ''}`}><span><Activity size={23} /></span><p>Patient booking status</p><h2>{isAvailable(doctor) ? 'Accepting appointments' : 'New bookings paused'}</h2><small>{isAvailable(doctor) ? 'Patients can see and book your published future slots.' : 'Your profile remains visible, but patients cannot make new bookings.'}</small><button type="button" onClick={onToggleAvailability}><i />{isAvailable(doctor) ? 'Pause new bookings' : 'Start accepting bookings'}</button></section>
-      <section className="doctor-panel doctor-schedule-summary"><p>Schedule summary</p><div><span>Upcoming dates<strong>{upcomingDays.length}</strong></span><span>Bookable slots<strong>{upcomingDays.reduce((total, [, slots]) => total + slots.length, 0)}</strong></span><span>Expired dates<strong>{expiredCount}</strong></span></div><button type="button" onClick={save} disabled={saving}>{saving ? <LoaderCircle size={17} className="animate-spin" /> : <Save size={17} />}{saving ? 'Publishing...' : 'Publish schedule'}</button></section>
+      <section className={`doctor-panel doctor-booking-status ${isAvailable(doctor) ? 'is-online' : ''}`}><span><Activity size={23} /></span><p>Patient booking status</p><h2>{isAvailable(doctor) ? 'Accepting appointments' : 'New bookings paused'}</h2><small>{isAvailable(doctor) ? 'Patients can book the published weekly timetable on future matching dates.' : 'Your profile remains visible, but patients cannot make new bookings.'}</small><button type="button" onClick={onToggleAvailability}><i />{isAvailable(doctor) ? 'Pause new bookings' : 'Start accepting bookings'}</button></section>
+      <section className="doctor-panel doctor-schedule-summary"><p>Weekly schedule summary</p><div><span>Scheduled days<strong>{scheduledDays.length}</strong></span><span>Weekly time slots<strong>{totalSlots}</strong></span><span>Repeats<strong>Every week</strong></span></div><button type="button" onClick={save} disabled={saving}>{saving ? <LoaderCircle size={17} className="animate-spin" /> : <Save size={17} />}{saving ? 'Publishing...' : 'Publish weekly schedule'}</button></section>
     </aside></div>
   </section>
 }
@@ -346,12 +431,54 @@ function ScheduleView({ doctor, draft, setDraft, onSave, onToggleAvailability })
 function ProfileView({ doctor, draft, setDraft, onSave }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [imageFile, setImageFile] = useState(null)
+  const imageInputRef = useRef(null)
+  const imagePreview = useMemo(() => imageFile ? URL.createObjectURL(imageFile) : doctor?.imageUrl, [doctor?.imageUrl, imageFile])
+
+  useEffect(() => {
+    if (!imageFile) return undefined
+    return () => URL.revokeObjectURL(imagePreview)
+  }, [imageFile, imagePreview])
+
   function change(event) { const { name, value } = event.target; setDraft((current) => ({ ...current, [name]: value })); setError('') }
-  async function submit(event) { event.preventDefault(); if (!draft.name.trim()) { setError('Your professional name is required.'); return } setSaving(true); try { await onSave() } catch (saveError) { setError(saveError.message || 'Unable to update profile.') } finally { setSaving(false) } }
+  function selectImage(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose a valid image file.')
+      event.target.value = ''
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Profile picture must be 5 MB or smaller.')
+      event.target.value = ''
+      return
+    }
+    setImageFile(file)
+    setError('')
+  }
+  function clearSelectedImage() {
+    setImageFile(null)
+    if (imageInputRef.current) imageInputRef.current.value = ''
+  }
+  async function submit(event) {
+    event.preventDefault()
+    if (!draft.name.trim()) { setError('Your professional name is required.'); return }
+    setSaving(true)
+    setError('')
+    try {
+      await onSave(imageFile)
+      clearSelectedImage()
+    } catch (saveError) {
+      setError(saveError.message || 'Unable to update profile.')
+    } finally {
+      setSaving(false)
+    }
+  }
   return <section className="doctor-view">
     <ViewHeading kicker="Professional identity" title="Profile settings" text="Keep the information patients see on your public doctor profile accurate and useful." />
-    <div className="doctor-profile-layout"><aside className="doctor-panel doctor-profile-preview"><div><ImageWithFallback src={doctor?.imageUrl} alt={doctor?.name} initials={initials(doctor?.name)} /><span className={isAvailable(doctor) ? 'availability-pill availability-pill--available' : 'availability-pill'}><i />{isAvailable(doctor) ? 'Available' : 'Unavailable'}</span></div><p>{draft.specialization || 'Medical professional'}</p><h2>{draft.name || 'Your name'}</h2><small>{draft.location || 'Location not provided'}</small><div><span>Experience<strong>{draft.experience || '—'}</strong></span><span>Consultation<strong>{formatCurrency(draft.fee)}</strong></span></div><Link to={`/doctors/${getId(doctor)}`} target="_blank">View public profile <ArrowRight size={15} /></Link></aside>
-      <form className="doctor-panel doctor-profile-form" onSubmit={submit}><PanelHeading icon={Edit3} title="Professional information" text="These details appear in the patient directory." /><div className="doctor-profile-form__grid"><ProfileField label="Display name" name="name" value={draft.name} onChange={change} required /><ProfileField label="Specialization" name="specialization" value={draft.specialization} onChange={change} /><ProfileField label="Experience" name="experience" value={draft.experience} onChange={change} placeholder="e.g. 10 years" /><ProfileField label="Qualifications" name="qualifications" value={draft.qualifications} onChange={change} /><ProfileField label="Practice location" name="location" value={draft.location} onChange={change} /><ProfileField label="Consultation fee" name="fee" type="number" min="0" value={draft.fee} onChange={change} /></div><label className="doctor-form-field"><span>About your practice <small>{draft.about.length}/1200</small></span><textarea name="about" rows="6" maxLength="1200" value={draft.about} onChange={change} placeholder="Describe your expertise and approach to patient care" /></label>{error && <p className="doctor-inline-error"><XCircle size={16} />{error}</p>}<button type="submit" className="doctor-profile-save" disabled={saving}>{saving ? <LoaderCircle size={17} className="animate-spin" /> : <Save size={17} />}{saving ? 'Saving profile...' : 'Save changes'}</button></form>
+    <div className="doctor-profile-layout"><aside className="doctor-panel doctor-profile-preview"><div><ImageWithFallback key={imagePreview || 'profile-preview'} src={imagePreview} alt={draft.name || doctor?.name} initials={initials(draft.name || doctor?.name)} /><span className={isAvailable(doctor) ? 'availability-pill availability-pill--available' : 'availability-pill'}><i />{isAvailable(doctor) ? 'Available' : 'Unavailable'}</span></div><p>{draft.specialization || 'Medical professional'}</p><h2>{draft.name || 'Your name'}</h2><small>{draft.location || 'Location not provided'}</small><div><span>Experience<strong>{draft.experience || '—'}</strong></span><span>Consultation<strong>{formatCurrency(draft.fee)}</strong></span></div><Link to={`/doctors/${getId(doctor)}`} target="_blank">View public profile <ArrowRight size={15} /></Link></aside>
+      <form className="doctor-panel doctor-profile-form" onSubmit={submit}><PanelHeading icon={Edit3} title="Professional information" text="These details appear in the patient directory." /><div className="doctor-profile-photo"><ImageWithFallback key={imagePreview || 'profile-photo'} src={imagePreview} alt={draft.name || doctor?.name} initials={initials(draft.name || doctor?.name)} /><div><strong>Profile picture</strong><p>Upload a JPG, PNG, or WebP image up to 5 MB.</p><span><label><Camera size={16} />{imageFile ? 'Choose another' : 'Choose photo'}<input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={selectImage} /></label>{imageFile && <button type="button" onClick={clearSelectedImage}>Remove selection</button>}</span>{imageFile && <small>{imageFile.name}</small>}</div></div><div className="doctor-profile-form__grid"><ProfileField label="Display name" name="name" value={draft.name} onChange={change} required /><ProfileField label="Specialization" name="specialization" value={draft.specialization} onChange={change} /><ProfileField label="Experience" name="experience" value={draft.experience} onChange={change} placeholder="e.g. 10 years" /><ProfileField label="Qualifications" name="qualifications" value={draft.qualifications} onChange={change} /><ProfileField label="Practice location" name="location" value={draft.location} onChange={change} /><ProfileField label="Consultation fee" name="fee" type="number" min="0" value={draft.fee} onChange={change} /></div><label className="doctor-form-field"><span>About your practice <small>{draft.about.length}/1200</small></span><textarea name="about" rows="6" maxLength="1200" value={draft.about} onChange={change} placeholder="Describe your expertise and approach to patient care" /></label>{error && <p className="doctor-inline-error"><XCircle size={16} />{error}</p>}<button type="submit" className="doctor-profile-save" disabled={saving}>{saving ? <LoaderCircle size={17} className="animate-spin" /> : <Save size={17} />}{saving ? 'Saving profile...' : 'Save changes'}</button></form>
     </div>
   </section>
 }
@@ -369,10 +496,6 @@ function TodayAppointment({ item, onUpdate }) {
   return <article><span>{formatAppointmentTime(item)}</span><div className="doctor-patient-avatar">{initials(item.patientName)}</div><div><strong>{item.patientName}</strong><small>{item.mobile} · {item.age ? `${item.age} years` : 'Age not provided'}</small></div><i className={statusClass(item.status)}>{item.status}</i>{!['Completed', 'Canceled'].includes(item.status) && <button type="button" onClick={confirm} disabled={working}>{working ? <LoaderCircle size={15} className="animate-spin" /> : <Check size={15} />}{item.status === 'Pending' ? 'Confirm' : 'Complete'}</button>}</article>
 }
 
-function normalizeSchedule(schedule) {
-  if (!schedule || typeof schedule !== 'object' || Array.isArray(schedule)) return {}
-  return Object.fromEntries(Object.entries(schedule).filter(([, slots]) => Array.isArray(slots)).map(([date, slots]) => [date, [...new Set(slots)].sort(sortTimes)]))
-}
 function profileFromDoctor(doctor) { return Object.fromEntries(profileFields.map((field) => [field, doctor?.[field] ?? ''])) }
 function sortAppointments(first, second) { return `${first.date || ''} ${toTwentyFourHour(first.time)}`.localeCompare(`${second.date || ''} ${toTwentyFourHour(second.time)}`) }
 function sortTimes(first, second) { return toTwentyFourHour(first).localeCompare(toTwentyFourHour(second)) }
@@ -383,3 +506,4 @@ function toTwentyFourHour(value = '') { const match = String(value).match(/^(\d{
 function todayLabel() { return new Date().toLocaleDateString('en-BD', { weekday: 'long', month: 'long', day: 'numeric' }) }
 function dayPeriod() { const hour = new Date().getHours(); return hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening' }
 function createdLabel(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? 'recently' : date.toLocaleDateString('en-BD', { month: 'short', day: 'numeric', year: 'numeric' }) }
+function requiresCashPaymentDecision(appointment) { return appointment?.payment?.method === 'Cash' && appointment?.payment?.status !== 'Paid' && Number(appointment?.fees ?? appointment?.payment?.amount ?? 0) > 0 }

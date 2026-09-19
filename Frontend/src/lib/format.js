@@ -35,13 +35,56 @@ export function isAvailable(value) {
     : String(value.availability).toLowerCase() === 'available'
 }
 
-export function cleanSchedule(schedule) {
-  if (!schedule || typeof schedule !== 'object' || Array.isArray(schedule)) return []
-  const today = localDateKey(new Date())
-  return Object.entries(schedule)
-    .filter(([date, slots]) => date >= today && Array.isArray(slots) && slots.length)
-    .sort(([first], [second]) => first.localeCompare(second))
-    .map(([date, slots]) => ({ date, slots: [...new Set(slots)] }))
+export const WEEK_DAYS = [
+  { key: 'monday', label: 'Monday' },
+  { key: 'tuesday', label: 'Tuesday' },
+  { key: 'wednesday', label: 'Wednesday' },
+  { key: 'thursday', label: 'Thursday' },
+  { key: 'friday', label: 'Friday' },
+  { key: 'saturday', label: 'Saturday' },
+  { key: 'sunday', label: 'Sunday' },
+]
+
+const WEEKDAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+
+export function normalizeWeeklySchedule(schedule) {
+  if (!schedule || typeof schedule !== 'object' || Array.isArray(schedule)) return {}
+  const output = {}
+  Object.entries(schedule).forEach(([rawDay, slots]) => {
+    if (!Array.isArray(slots)) return
+    const lowered = String(rawDay).toLowerCase()
+    let day = WEEK_DAYS.find((item) => item.key === lowered || item.key.slice(0, 3) === lowered)?.key
+    if (!day && /^\d{4}-\d{2}-\d{2}$/.test(lowered)) {
+      const legacyDate = new Date(`${lowered}T00:00:00`)
+      if (!Number.isNaN(legacyDate.getTime())) day = WEEKDAY_KEYS[legacyDate.getDay()]
+    }
+    if (!day) return
+    const normalizedSlots = slots.map(normalizeTimeSlot).filter(Boolean)
+    output[day] = [...new Set([...(output[day] || []), ...normalizedSlots])].sort(compareTimeSlots)
+  })
+  return output
+}
+
+export function cleanSchedule(schedule, options = {}) {
+  const weekly = normalizeWeeklySchedule(schedule)
+  const bookedSlots = options.bookedSlots || {}
+  const horizonDays = Math.max(7, Number(options.horizonDays || 28))
+  const start = new Date()
+  const nowMinutes = start.getHours() * 60 + start.getMinutes()
+  start.setHours(0, 0, 0, 0)
+  const output = []
+
+  for (let offset = 0; offset < horizonDays; offset += 1) {
+    const date = new Date(start)
+    date.setDate(start.getDate() + offset)
+    const dateKey = localDateKey(date)
+    const slots = weekly[WEEKDAY_KEYS[date.getDay()]] || []
+    const booked = new Set((bookedSlots[dateKey] || []).map(normalizeTimeSlot))
+    const availableSlots = slots.filter((slot) => !booked.has(normalizeTimeSlot(slot)) && (offset > 0 || timeSlotMinutes(slot) > nowMinutes))
+    if (availableSlots.length) output.push({ date: dateKey, slots: availableSlots })
+  }
+
+  return output
 }
 
 export function localDateKey(date) {
@@ -58,4 +101,25 @@ export function statusClass(status) {
 export function appointmentImage(item, kind) {
   if (kind === 'service') return item?.serviceImage?.url || item?.serviceId?.imageUrl || ''
   return item?.doctorImage?.url || item?.doctorId?.imageUrl || ''
+}
+
+function normalizeTimeSlot(value) {
+  const match = String(value || '').trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)
+  if (!match) return ''
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return ''
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${match[3].toUpperCase()}`
+}
+
+function compareTimeSlots(first, second) {
+  return timeSlotMinutes(first) - timeSlotMinutes(second)
+}
+
+function timeSlotMinutes(value) {
+  const normalized = normalizeTimeSlot(value)
+  if (!normalized) return Number.POSITIVE_INFINITY
+  const [time, suffix] = normalized.split(' ')
+  const [rawHour, minute] = time.split(':').map(Number)
+  return (rawHour % 12 + (suffix === 'PM' ? 12 : 0)) * 60 + minute
 }

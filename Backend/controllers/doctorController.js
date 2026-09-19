@@ -1,46 +1,13 @@
 import Doctor from "../models/Doctor.js";
+import Appointment from "../models/Appointment.js";
 import { uploadToCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
+import { normalizeWeeklySchedule } from "../utils/weeklySchedule.js";
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
 
-//helper function
-
-
-//this function will convert time to number of minutes since midninght
-const parseTimeToMinutes = (t = "") => {
-  const [time = "0:00", ampm = ""] = (t || "").split(" ");
-  const [hh = 0, mm = 0] = time.split(":").map(Number);
-  let h = hh % 12;
-  if ((ampm || "").toUpperCase() === "PM") h += 12;
-  return h * 60 + (mm || 0);
-};
-
-
-//this function will remove duplicate slot and return th slot filter by time
-function dedupeAndSortSchedule(schedule = {}) {
-  const out = {};
-  Object.entries(schedule).forEach(([date, slots]) => {
-    if (!Array.isArray(slots)) return;
-    const uniq = Array.from(new Set(slots));
-    uniq.sort((a, b) => parseTimeToMinutes(a) - parseTimeToMinutes(b));
-    out[date] = uniq;
-  });
-  return out;
-}
-
-
-//thsi funtion accept the obj or json string
 function parseScheduleInput(s) {
-  if (!s) return {};
-  if (typeof s === "string") {
-    try {
-      s = JSON.parse(s);
-    } catch {
-      return {};
-    }
-  }
-  return dedupeAndSortSchedule(s || {});
+  return normalizeWeeklySchedule(s);
 }
 
 
@@ -48,16 +15,7 @@ function parseScheduleInput(s) {
 function normalizeDocForClient(raw = {}) {
   const doc = { ...raw };
 
-  // convert Mongoose Map to plain object
-  if (doc.schedule && typeof doc.schedule.forEach === "function") {
-    const obj = {};
-    doc.schedule.forEach((val, key) => {
-      obj[key] = Array.isArray(val) ? val : [];
-    });
-    doc.schedule = obj;
-  } else if (!doc.schedule || typeof doc.schedule !== "object") {
-    doc.schedule = {};
-  }
+  doc.schedule = normalizeWeeklySchedule(doc.schedule);
 
   doc.availability = doc.availability === undefined ? "Available" : doc.availability;
   doc.patients = doc.patients ?? "";
@@ -226,7 +184,7 @@ export const getDoctors = async (req, res) => {
       fee: d.fee ?? d.fees ?? d.consultationFee ?? 0,
       imageUrl: d.imageUrl || d.image || d.avatar || null,
       availability: d.availability ?? "Available",
-      schedule: (d.schedule && typeof d.schedule === "object") ? d.schedule : {},
+      schedule: normalizeWeeklySchedule(d.schedule),
       patients: d.patients ?? "",
       rating: d.rating ?? 0,
       about: d.about ?? "",
@@ -265,8 +223,21 @@ export async function getDoctorById(req,res) {
     message:"doctor not found"
 });
 
+    const today = new Date();
+    const horizon = new Date(today);
+    horizon.setDate(horizon.getDate() + 42);
+    const dateKey = (value) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+    const bookedAppointments = await Appointment.find({
+      doctorId: doc._id,
+      date: { $gte: dateKey(today), $lte: dateKey(horizon) },
+      status: { $ne: "Canceled" },
+    }).select("date time").lean();
+    const bookedSlots = bookedAppointments.reduce((output, appointment) => {
+      output[appointment.date] = [...new Set([...(output[appointment.date] || []), appointment.time])];
+      return output;
+    }, {});
 
-    return res.json({success:true,data:normalizeDocForClient(doc)});
+    return res.json({success:true,data:{...normalizeDocForClient(doc),bookedSlots}});
     } catch (err) {
     console.error("getDoctorById Erros:", err);
     return res.status(500).json({ success: false, message: "Server     error" });
@@ -304,7 +275,7 @@ export async function updateDoctor(req, res) {
       existing.imageUrl = body.imageUrl;
     }
 
-    if (body.schedule) existing.schedule = parseScheduleInput(body.schedule);
+    if (body.schedule !== undefined) existing.schedule = parseScheduleInput(body.schedule);
 
     const updatable = ["name", "specialization", "experience", "qualifications", "location", "about", "fee", "availability", "success", "patients", "rating"];
     updatable.forEach((k) => { if (body[k] !== undefined) existing[k] = body[k]; });

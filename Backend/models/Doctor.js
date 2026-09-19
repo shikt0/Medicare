@@ -38,6 +38,7 @@ availability: {
       default: "Available",
     },
 
+// Recurring weekly availability keyed by monday ... sunday.
 schedule: { type: Map, of: [String], default: { } },
 success: { type: String, default: "" },
 patients: { type: String, default: "" },

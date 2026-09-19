@@ -134,14 +134,16 @@ export default function Appointments() {
     await performStatusUpdate(appointment, nextStatus)
   }
 
-  async function performStatusUpdate(appointment, nextStatus) {
+  async function performStatusUpdate(appointment, nextStatus, cashPaymentReceived) {
     const id = getId(appointment)
     if (!id) return
     setWorkingId(`${id}-${nextStatus}`)
     setError('')
 
     try {
-      await api.updateAppointment(id, { status: nextStatus })
+      const body = { status: nextStatus }
+      if (typeof cashPaymentReceived === 'boolean') body.cashPaymentReceived = cashPaymentReceived
+      await api.updateAppointment(id, body)
       setPendingAction(null)
       setSuccess(`${patientName(appointment)}’s appointment is now ${nextStatus.toLowerCase()}.`)
       await Promise.all([
@@ -242,7 +244,7 @@ export default function Appointments() {
           <SummaryCard icon={CalendarDays} label="Total appointments" value={stats.total} detail={`${stats.recentLast7Days || 0} created in the last 7 days`} tone="sky" />
           <SummaryCard icon={Clock3} label="Pending" value={statusCounts.Pending} detail="Needs admin follow-up" tone="amber" />
           <SummaryCard icon={CheckCircle2} label="Completed" value={statusCounts.Completed} detail={`${statusCounts.Confirmed} currently confirmed`} tone="emerald" />
-          <SummaryCard icon={WalletCards} label="Paid revenue" value={formatCurrency(stats.revenue)} detail="Payments marked as paid" tone="violet" />
+          <SummaryCard icon={WalletCards} label="Doctor-visit revenue" value={formatCurrency(stats.revenue)} detail="Completed visits marked paid" tone="violet" />
         </section>
 
         <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -369,9 +371,9 @@ export default function Appointments() {
           action={pendingAction}
           busy={Boolean(workingId)}
           onClose={() => !workingId && setPendingAction(null)}
-          onConfirm={() => pendingAction.type === 'cancel'
+          onConfirm={(cashPaymentReceived) => pendingAction.type === 'cancel'
             ? cancelAppointment(pendingAction.appointment)
-            : performStatusUpdate(pendingAction.appointment, 'Completed')}
+            : performStatusUpdate(pendingAction.appointment, 'Completed', cashPaymentReceived)}
         />
       )}
     </main>
@@ -565,6 +567,8 @@ function AppointmentModal({ appointment, busy, onClose, onReschedule, onCancel }
 function ConfirmActionModal({ action, busy, onClose, onConfirm }) {
   const canceling = action.type === 'cancel'
   const appointment = action.appointment
+  const needsCashDecision = !canceling && requiresCashPaymentDecision(appointment)
+  const [cashPaymentReceived, setCashPaymentReceived] = useState(null)
   return (
     <ModalShell onClose={onClose} titleId="confirm-action-title" closeDisabled={busy} size="max-w-md">
       <div className="p-6">
@@ -577,17 +581,27 @@ function ConfirmActionModal({ action, busy, onClose, onConfirm }) {
         <p className="mt-2 text-sm leading-6 text-slate-500">
           {canceling
             ? `${patientName(appointment)}’s booking will be canceled. A canceled appointment cannot be reopened from the admin console.`
-            : `${patientName(appointment)}’s booking will be closed as completed. This status cannot be changed afterward.`}
+            : `${patientName(appointment)}’s booking will be closed as completed. Only a completed, paid visit is added to doctor-visit revenue.`}
         </p>
         <div className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
           <span className="font-bold text-slate-800">{formatDate(appointment.date)}</span> at {appointment.time} with Dr. {doctorNameFromAppointment(appointment)}
         </div>
+        {needsCashDecision && (
+          <fieldset className="mt-5">
+            <legend className="text-sm font-bold text-slate-800">Was the consultation fee received in cash?</legend>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Choose one before completing the visit. Unpaid cash is excluded from revenue.</p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button type="button" aria-pressed={cashPaymentReceived === true} onClick={() => setCashPaymentReceived(true)} disabled={busy} className={`rounded-xl border px-3 py-3 text-sm font-bold transition ${cashPaymentReceived === true ? 'border-emerald-500 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-100' : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300'}`}>Yes, received</button>
+              <button type="button" aria-pressed={cashPaymentReceived === false} onClick={() => setCashPaymentReceived(false)} disabled={busy} className={`rounded-xl border px-3 py-3 text-sm font-bold transition ${cashPaymentReceived === false ? 'border-amber-500 bg-amber-50 text-amber-800 ring-2 ring-amber-100' : 'border-slate-200 bg-white text-slate-700 hover:border-amber-300'}`}>No, unpaid</button>
+            </div>
+          </fieldset>
+        )}
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} disabled={busy} autoFocus className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Go back</button>
           <button
             type="button"
-            onClick={onConfirm}
-            disabled={busy}
+            onClick={() => onConfirm(cashPaymentReceived)}
+            disabled={busy || (needsCashDecision && cashPaymentReceived === null)}
             className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60 ${canceling ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
           >
             {busy && <LoaderCircle className="animate-spin" size={16} />}
@@ -707,6 +721,12 @@ function patientName(appointment) {
 
 function isTerminal(status) {
   return status === 'Completed' || status === 'Canceled'
+}
+
+function requiresCashPaymentDecision(appointment) {
+  return appointment?.payment?.method === 'Cash'
+    && appointment?.payment?.status !== 'Paid'
+    && Number(appointment?.fees ?? appointment?.payment?.amount ?? 0) > 0
 }
 
 function shortId(appointment) {

@@ -52,10 +52,20 @@ const specializations = [
   'Psychiatry',
 ]
 
+const WEEK_DAYS = [
+  { key: 'monday', label: 'Monday' },
+  { key: 'tuesday', label: 'Tuesday' },
+  { key: 'wednesday', label: 'Wednesday' },
+  { key: 'thursday', label: 'Thursday' },
+  { key: 'friday', label: 'Friday' },
+  { key: 'saturday', label: 'Saturday' },
+  { key: 'sunday', label: 'Sunday' },
+]
+
 export default function AddDoctor() {
   const [form, setForm] = useState(initialForm)
   const [schedule, setSchedule] = useState({})
-  const [slotDate, setSlotDate] = useState('')
+  const [slotDay, setSlotDay] = useState('monday')
   const [slotTime, setSlotTime] = useState('')
   const [slotError, setSlotError] = useState('')
   const [image, setImage] = useState(null)
@@ -70,7 +80,7 @@ export default function AddDoctor() {
 
   useEffect(() => () => revokePreviewUrl(objectUrlRef), [])
 
-  const scheduleEntries = Object.entries(schedule).sort(([first], [second]) => first.localeCompare(second))
+  const scheduleEntries = WEEK_DAYS.map((day) => [day.key, schedule[day.key] || []]).filter(([, slots]) => slots.length)
   const totalSlots = scheduleEntries.reduce((total, [, slots]) => total + slots.length, 0)
   const previewImage = imagePreview || form.imageUrl.trim()
 
@@ -120,21 +130,21 @@ export default function AddDoctor() {
   }
 
   function addScheduleSlot() {
-    if (!slotDate || !slotTime) {
-      setSlotError('Choose both a date and a time.')
+    if (!slotDay || !slotTime) {
+      setSlotError('Choose both a weekday and a time.')
       return
     }
 
     const label = toTwelveHourTime(slotTime)
-    const existingSlots = schedule[slotDate] || []
+    const existingSlots = schedule[slotDay] || []
     if (existingSlots.includes(label)) {
-      setSlotError('That time is already in the schedule for this date.')
+      setSlotError('That time is already in the weekly schedule for this day.')
       return
     }
 
     setSchedule((current) => ({
       ...current,
-      [slotDate]: [...(current[slotDate] || []), label].sort(compareTimeSlots),
+      [slotDay]: [...(current[slotDay] || []), label].sort(compareTimeSlots),
     }))
     setSlotError('')
     setSlotTime('')
@@ -155,10 +165,18 @@ export default function AddDoctor() {
     setSlotError('')
   }
 
+  function clearScheduleDay(day) {
+    setSchedule((current) => {
+      const next = { ...current }
+      delete next[day]
+      return next
+    })
+  }
+
   function resetForm() {
     setForm(initialForm)
     setSchedule({})
-    setSlotDate('')
+    setSlotDay('monday')
     setSlotTime('')
     setSlotError('')
     setErrors({})
@@ -214,7 +232,7 @@ export default function AddDoctor() {
           <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-emerald-600">Provider management</p>
           <h1 className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">Add a doctor</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-            Create the doctor’s account, public profile, consultation fee, and available appointment slots.
+            Create the doctor’s account, public profile, consultation fee, and recurring weekly appointment slots.
           </p>
         </header>
 
@@ -440,22 +458,22 @@ export default function AddDoctor() {
 
             <FormSection
               icon={CalendarDays}
-              title="Appointment schedule"
-              subtitle="Add the dates and times patients can select while booking."
+              title="Weekly appointment schedule"
+              subtitle="Set weekday times once. They repeat automatically every week until canceled."
             >
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                 <label>
-                  <span className="mb-2 block text-sm font-bold text-slate-700">Date</span>
-                  <input
-                    type="date"
-                    value={slotDate}
-                    min={localDateKey(new Date())}
+                  <span className="mb-2 block text-sm font-bold text-slate-700">Weekday</span>
+                  <select
+                    value={slotDay}
                     onChange={(event) => {
-                      setSlotDate(event.target.value)
+                      setSlotDay(event.target.value)
                       setSlotError('')
                     }}
                     className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50"
-                  />
+                  >
+                    {WEEK_DAYS.map((day) => <option key={day.key} value={day.key}>{day.label}</option>)}
+                  </select>
                 </label>
                 <label>
                   <span className="mb-2 block text-sm font-bold text-slate-700">Time</span>
@@ -474,7 +492,7 @@ export default function AddDoctor() {
                   onClick={addScheduleSlot}
                   className="mt-auto inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-bold text-white transition hover:bg-emerald-700"
                 >
-                  <Plus size={17} /> Add slot
+                  <Plus size={17} /> Add weekly slot
                 </button>
               </div>
 
@@ -482,7 +500,7 @@ export default function AddDoctor() {
 
               <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/70">
                 <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-                  <p className="text-sm font-bold text-slate-800">{totalSlots} appointment {totalSlots === 1 ? 'slot' : 'slots'}</p>
+                  <p className="text-sm font-bold text-slate-800">{totalSlots} recurring appointment {totalSlots === 1 ? 'slot' : 'slots'}</p>
                   {totalSlots > 0 && (
                     <button type="button" onClick={clearSchedule} className="text-xs font-bold text-rose-600 hover:text-rose-700">
                       Clear schedule
@@ -493,15 +511,16 @@ export default function AddDoctor() {
                 {scheduleEntries.length === 0 ? (
                   <div className="px-4 py-8 text-center">
                     <Clock3 className="mx-auto text-slate-300" size={24} />
-                    <p className="mt-2 text-sm font-semibold text-slate-500">No appointment slots added</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-500">No weekly appointment slots added</p>
                   </div>
                 ) : (
                   <div className="divide-y divide-slate-200">
-                    {scheduleEntries.map(([date, slots]) => (
-                      <div key={date} className="grid gap-3 px-4 py-4 sm:grid-cols-[10rem_minmax(0,1fr)]">
+                    {scheduleEntries.map(([day, slots]) => (
+                      <div key={day} className="grid gap-3 px-4 py-4 sm:grid-cols-[10rem_minmax(0,1fr)]">
                         <div>
-                          <p className="text-sm font-bold text-slate-800">{formatScheduleDate(date)}</p>
+                          <p className="text-sm font-bold text-slate-800">{formatScheduleDay(day)}</p>
                           <p className="mt-0.5 text-xs text-slate-400">{slots.length} {slots.length === 1 ? 'slot' : 'slots'}</p>
+                          <button type="button" onClick={() => clearScheduleDay(day)} className="mt-2 text-xs font-bold text-rose-600 hover:text-rose-700">Cancel day</button>
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {slots.map((slot) => (
@@ -509,8 +528,8 @@ export default function AddDoctor() {
                               {slot}
                               <button
                                 type="button"
-                                onClick={() => removeScheduleSlot(date, slot)}
-                                aria-label={`Remove ${slot} on ${date}`}
+                                onClick={() => removeScheduleSlot(day, slot)}
+                                aria-label={`Cancel ${slot} every ${formatScheduleDay(day)}`}
                                 className="grid h-5 w-5 place-items-center rounded-full text-slate-400 hover:bg-rose-50 hover:text-rose-600"
                               >
                                 <X size={12} />
@@ -547,7 +566,7 @@ export default function AddDoctor() {
               <div className="space-y-4 p-5">
                 <PreviewItem icon={MapPin} label="Location" value={form.location.trim() || 'Not provided'} />
                 <PreviewItem icon={WalletCards} label="Consultation fee" value={form.fee === '' ? 'Not set' : formatCurrency(form.fee)} />
-                <PreviewItem icon={CalendarDays} label="Schedule" value={`${totalSlots} appointment ${totalSlots === 1 ? 'slot' : 'slots'}`} />
+                <PreviewItem icon={CalendarDays} label="Weekly schedule" value={`${totalSlots} recurring ${totalSlots === 1 ? 'slot' : 'slots'}`} />
                 <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5">
                   <span className="text-xs font-bold text-slate-500">Profile status</span>
                   <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${form.availability === 'Available' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
@@ -784,16 +803,8 @@ function timeSlotMinutes(value) {
   return hour * 60 + minute
 }
 
-function formatScheduleDate(value) {
-  const date = new Date(`${value}T00:00:00`)
-  return date.toLocaleDateString('en-BD', { weekday: 'short', month: 'short', day: 'numeric' })
-}
-
-function localDateKey(date) {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+function formatScheduleDay(value) {
+  return WEEK_DAYS.find((day) => day.key === value)?.label || value
 }
 
 function finiteNumber(value) {

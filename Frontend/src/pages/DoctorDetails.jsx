@@ -51,7 +51,7 @@ export default function DoctorDetails() {
     }))
   }, [user])
 
-  const schedule = useMemo(() => cleanSchedule(doctor?.schedule), [doctor])
+  const schedule = useMemo(() => cleanSchedule(doctor?.schedule, { bookedSlots: doctor?.bookedSlots, horizonDays: 28 }), [doctor])
   const selectedSlots = schedule.find((day) => day.date === selectedDate)?.slots || []
   const available = doctor ? isAvailable(doctor) : false
 
@@ -106,6 +106,13 @@ export default function DoctorDetails() {
         return
       }
       setSuccess('Your appointment has been booked successfully.')
+      setDoctor((current) => ({
+        ...current,
+        bookedSlots: {
+          ...(current?.bookedSlots || {}),
+          [selectedDate]: [...new Set([...(current?.bookedSlots?.[selectedDate] || []), selectedTime])],
+        },
+      }))
       setSelectedDate('')
       setSelectedTime('')
     } catch (bookingError) {
@@ -147,8 +154,8 @@ export default function DoctorDetails() {
 
               <div className="booking-layout">
                 <section className="booking-schedule-panel">
-                  <div className="booking-section-heading"><span><CalendarDays size={20} /></span><div><h2>Choose an appointment</h2><p>Select an available date, then choose a time.</p></div></div>
-                  {!available ? <ScheduleMessage title="Bookings are paused" text="This doctor is currently unavailable. You can still review the profile or choose another doctor." /> : schedule.length === 0 ? <ScheduleMessage title="No upcoming slots" text="New appointment times have not been published yet. Please check again later." /> : (
+                  <div className="booking-section-heading"><span><CalendarDays size={20} /></span><div><h2>Choose an appointment</h2><p>Select a date generated from the doctor’s weekly schedule.</p></div></div>
+                  {!available ? <ScheduleMessage title="Bookings are paused" text="This doctor is currently unavailable. You can still review the profile or choose another doctor." /> : schedule.length === 0 ? <ScheduleMessage title="No upcoming slots" text="The doctor has not published any weekly appointment times yet. Please check again later." /> : (
                     <>
                       <div className="booking-date-grid">{schedule.map((day) => <button key={day.date} type="button" onClick={() => selectDate(day.date)} className={selectedDate === day.date ? 'is-selected' : ''}><small>{formatDate(day.date, { short: true })}</small><strong>{day.slots.length} slots</strong></button>)}</div>
                       {selectedDate && <div className="booking-time-section"><p><Clock3 size={15} /> Available times for {formatDate(selectedDate)}</p><div>{selectedSlots.map((slot) => <button key={slot} type="button" onClick={() => { setSelectedTime(slot); setFormError('') }} className={selectedTime === slot ? 'is-selected' : ''}>{slot}</button>)}</div></div>}

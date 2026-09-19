@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  CalendarClock,
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
@@ -20,16 +19,15 @@ import {
   XCircle,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useStaffAuth } from '../auth/staffAuth'
 import {
   formatCurrency,
-  formatDate,
   getId,
-  serviceAppointmentTime,
   serviceNameFromAppointment,
 } from '../lib/format'
 
 const PAGE_SIZE = 12
-const STATUS_FILTERS = ['', 'Pending', 'Confirmed', 'Rescheduled', 'Completed', 'Canceled']
+const STATUS_FILTERS = ['', 'Pending', 'Confirmed', 'Completed', 'Canceled']
 const initialSummary = {
   totalAppointments: 0,
   pending: 0,
@@ -41,6 +39,8 @@ const initialSummary = {
 }
 
 export default function ServiceAppointments() {
+  const { actor } = useStaffAuth()
+  const isAdmin = actor?.role === 'admin'
   const [appointments, setAppointments] = useState([])
   const [meta, setMeta] = useState({ page: 1, limit: PAGE_SIZE, total: 0 })
   const [summary, setSummary] = useState(initialSummary)
@@ -77,7 +77,7 @@ export default function ServiceAppointments() {
       return true
     } catch (loadError) {
       if (requestId !== requestSequence.current) return false
-      setError(loadError.message || 'Unable to load service bookings.')
+      setError(loadError.message || 'Unable to load service requests.')
       return false
     } finally {
       if (!quiet && requestId === requestSequence.current) setLoading(false)
@@ -161,41 +161,22 @@ export default function ServiceAppointments() {
     await performStatusUpdate(appointment, nextStatus)
   }
 
-  async function performStatusUpdate(appointment, nextStatus) {
+  async function performStatusUpdate(appointment, nextStatus, cashPaymentReceived) {
     const id = getId(appointment)
     if (!id) return
     setWorkingId(`${id}-status`)
     setError('')
 
     try {
-      await api.updateServiceAppointment(id, { status: nextStatus })
+      const body = { status: nextStatus }
+      if (typeof cashPaymentReceived === 'boolean') body.cashPaymentReceived = cashPaymentReceived
+      await api.updateServiceAppointment(id, body)
       setPendingAction(null)
-      setSuccess(`${patientName(appointment)}'s service booking is now ${nextStatus.toLowerCase()}.`)
+      setSuccess(`${patientName(appointment)}'s service request is now ${nextStatus.toLowerCase()}.`)
       await reloadCurrentView()
     } catch (updateError) {
-      setError(updateError.message || 'Unable to update the booking status.')
+      setError(updateError.message || 'Unable to update the request status.')
       setPendingAction(null)
-    } finally {
-      setWorkingId('')
-    }
-  }
-
-  async function rescheduleAppointment(appointment, date, time) {
-    const id = getId(appointment)
-    if (!id) return { ok: false, message: 'This booking has no valid identifier.' }
-    setWorkingId(`${id}-reschedule`)
-    setError('')
-
-    try {
-      await api.updateServiceAppointment(id, {
-        rescheduledTo: { date, time: toTwelveHourTime(time) },
-      })
-      setSelectedAppointment(null)
-      setSuccess(`${patientName(appointment)}'s service booking was rescheduled.`)
-      await reloadCurrentView()
-      return { ok: true }
-    } catch (rescheduleError) {
-      return { ok: false, message: rescheduleError.message || 'Unable to reschedule this booking.' }
     } finally {
       setWorkingId('')
     }
@@ -203,7 +184,7 @@ export default function ServiceAppointments() {
 
   async function saveNotes(appointment, notes) {
     const id = getId(appointment)
-    if (!id) return { ok: false, message: 'This booking has no valid identifier.' }
+    if (!id) return { ok: false, message: 'This request has no valid identifier.' }
     setWorkingId(`${id}-notes`)
 
     try {
@@ -213,7 +194,7 @@ export default function ServiceAppointments() {
       await fetchAppointments({ search: search.trim(), status, page, limit: PAGE_SIZE }, true)
       return { ok: true }
     } catch (notesError) {
-      return { ok: false, message: notesError.message || 'Unable to save booking notes.' }
+      return { ok: false, message: notesError.message || 'Unable to save request notes.' }
     } finally {
       setWorkingId('')
     }
@@ -248,10 +229,10 @@ export default function ServiceAppointments() {
     try {
       await api.cancelServiceAppointment(id)
       setPendingAction(null)
-      setSuccess(`${patientName(appointment)}'s service booking was canceled.`)
+      setSuccess(`${patientName(appointment)}'s service request was canceled.`)
       await reloadCurrentView()
     } catch (cancelError) {
-      setError(cancelError.message || 'Unable to cancel this booking.')
+      setError(cancelError.message || 'Unable to cancel this request.')
       setPendingAction(null)
     } finally {
       setWorkingId('')
@@ -285,9 +266,9 @@ export default function ServiceAppointments() {
       <div className="mx-auto max-w-[90rem]">
         <header className="page-heading mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-emerald-600">Service operations</p>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">Service bookings</h1>
-            <p className="mt-2 text-sm text-slate-500">Manage patients, schedules, payments, and service delivery status.</p>
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-emerald-600">{isAdmin ? 'Service operations' : 'Pathologist workspace'}</p>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">{isAdmin ? 'Service requests' : 'My service requests'}</h1>
+            <p className="mt-2 text-sm text-slate-500">24/7 requests are assigned automatically to active pathologists in serial order.</p>
           </div>
           <button type="button" onClick={refreshAll} disabled={refreshing} className="inline-flex h-11 self-start items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 shadow-sm transition hover:border-emerald-200 hover:text-emerald-700 disabled:cursor-wait disabled:opacity-60 sm:self-auto">
             <RefreshCw size={17} className={refreshing ? 'animate-spin' : ''} />
@@ -299,29 +280,29 @@ export default function ServiceAppointments() {
         {success && <Alert tone="success" onClose={() => setSuccess('')}>{success}</Alert>}
         {summaryError && (
           <div className="mb-5 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
-            <span className="flex-1">Booking totals are temporarily unavailable. The booking list is still usable.</span>
+            <span className="flex-1">Request totals are temporarily unavailable. The request list is still usable.</span>
             <button type="button" onClick={fetchSummary} className="font-bold underline underline-offset-4">Retry</button>
             <button type="button" onClick={() => setSummaryError(false)} aria-label="Dismiss summary warning" className="grid h-7 w-7 place-items-center rounded-lg hover:bg-black/5"><X size={14} /></button>
           </div>
         )}
 
-        <section aria-label="Service booking summary" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard icon={CalendarDays} label="Total bookings" value={summary.totalAppointments} detail={`${summary.canceled} canceled bookings`} tone="sky" />
-          <SummaryCard icon={Clock3} label="Pending" value={summary.pending} detail="Needs admin follow-up" tone="amber" />
+        <section aria-label="Service request summary" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <SummaryCard icon={CalendarDays} label="Total requests" value={summary.totalAppointments} detail={`${summary.canceled} canceled requests`} tone="sky" />
+          <SummaryCard icon={Clock3} label="Pending" value={summary.pending} detail={isAdmin ? 'Needs admin follow-up' : 'Needs your attention'} tone="amber" />
           <SummaryCard icon={CheckCircle2} label="Completed" value={summary.completed} detail={`${summary.confirmed} currently confirmed`} tone="emerald" />
-          <SummaryCard icon={WalletCards} label="Completed revenue" value={formatCurrency(summary.earning)} detail="Fees from completed services" tone="violet" />
+          <SummaryCard icon={WalletCards} label="Service revenue" value={formatCurrency(summary.earning)} detail="Completed services marked paid" tone="violet" />
         </section>
 
         <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 p-4 sm:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">Service booking queue</h2>
-                <p className="mt-1 text-sm text-slate-500">{meta.total || 0} {Number(meta.total) === 1 ? 'booking matches' : 'bookings match'} this view</p>
+                <h2 className="text-lg font-bold text-slate-900">Service request queue</h2>
+                <p className="mt-1 text-sm text-slate-500">{meta.total || 0} {Number(meta.total) === 1 ? 'request matches' : 'requests match'} this view</p>
               </div>
               <label className="relative block w-full lg:w-96">
                 <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
-                <span className="sr-only">Search service bookings</span>
+                <span className="sr-only">Search service requests</span>
                 <input value={search} onChange={(event) => updateSearch(event.target.value)} placeholder="Search patient, phone, service, notes" className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-10 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-50" />
                 {search && <button type="button" onClick={() => updateSearch('')} aria-label="Clear search" className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-lg text-slate-400 hover:bg-white hover:text-slate-700"><X size={14} /></button>}
               </label>
@@ -340,8 +321,8 @@ export default function ServiceAppointments() {
             </div>
           </div>
 
-          <div className="hidden grid-cols-[minmax(12rem,1.1fr)_minmax(12rem,1.05fr)_minmax(9rem,.8fr)_minmax(8rem,.7fr)_minmax(9rem,.75fr)_auto] gap-4 border-b border-slate-100 bg-slate-50 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 xl:grid">
-            <span>Patient</span><span>Service</span><span>Schedule</span><span>Payment</span><span>Status</span><span className="text-right">Actions</span>
+          <div className="hidden grid-cols-[minmax(12rem,1.1fr)_minmax(12rem,1.05fr)_minmax(11rem,.9fr)_minmax(8rem,.7fr)_minmax(9rem,.75fr)_auto] gap-4 border-b border-slate-100 bg-slate-50 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 xl:grid">
+            <span>Patient</span><span>Service</span><span>Requested / assigned</span><span>Payment</span><span>Status</span><span className="text-right">Actions</span>
           </div>
 
           {loading ? (
@@ -379,9 +360,9 @@ export default function ServiceAppointments() {
         <AppointmentModal
           key={getId(selectedAppointment)}
           appointment={selectedAppointment}
+          isAdmin={isAdmin}
           busy={workingId.startsWith(`${getId(selectedAppointment)}-`)}
           onClose={() => setSelectedAppointment(null)}
-          onReschedule={(date, time) => rescheduleAppointment(selectedAppointment, date, time)}
           onSaveNotes={(notes) => saveNotes(selectedAppointment, notes)}
           onCancel={() => requestAction('cancel', selectedAppointment)}
           onMarkPaid={() => requestAction('paid', selectedAppointment)}
@@ -393,10 +374,10 @@ export default function ServiceAppointments() {
           action={pendingAction}
           busy={Boolean(workingId)}
           onClose={() => !workingId && setPendingAction(null)}
-          onConfirm={() => {
+          onConfirm={(cashPaymentReceived) => {
             if (pendingAction.type === 'cancel') cancelAppointment(pendingAction.appointment)
             else if (pendingAction.type === 'paid') markPaymentPaid(pendingAction.appointment)
-            else performStatusUpdate(pendingAction.appointment, 'Completed')
+            else performStatusUpdate(pendingAction.appointment, 'Completed', cashPaymentReceived)
           }}
         />
       )}
@@ -410,7 +391,7 @@ function AppointmentRow({ appointment, workingId, onStatusChange, onManage }) {
   const updating = workingId.startsWith(`${id}-`)
 
   return (
-    <article className="grid gap-4 px-5 py-4 transition hover:bg-slate-50/70 sm:grid-cols-2 xl:grid-cols-[minmax(12rem,1.1fr)_minmax(12rem,1.05fr)_minmax(9rem,.8fr)_minmax(8rem,.7fr)_minmax(9rem,.75fr)_auto] xl:items-center">
+    <article className="grid gap-4 px-5 py-4 transition hover:bg-slate-50/70 sm:grid-cols-2 xl:grid-cols-[minmax(12rem,1.1fr)_minmax(12rem,1.05fr)_minmax(11rem,.9fr)_minmax(8rem,.7fr)_minmax(9rem,.75fr)_auto] xl:items-center">
       <div className="min-w-0">
         <MobileLabel>Patient</MobileLabel>
         <div className="flex items-center gap-3">
@@ -423,11 +404,11 @@ function AppointmentRow({ appointment, workingId, onStatusChange, onManage }) {
         <MobileLabel>Service</MobileLabel>
         <div className="flex items-center gap-3">
           <ServiceImage appointment={appointment} />
-          <div className="min-w-0"><p className="truncate text-sm font-bold text-slate-800">{serviceNameFromAppointment(appointment)}</p><p className="mt-0.5 truncate text-xs text-slate-500">Booking #{shortId(appointment)}</p></div>
+          <div className="min-w-0"><p className="truncate text-sm font-bold text-slate-800">{serviceNameFromAppointment(appointment)}</p><p className="mt-0.5 truncate text-xs text-slate-500">Request #{shortId(appointment)}</p></div>
         </div>
       </div>
 
-      <div><MobileLabel>Schedule</MobileLabel><p className="text-sm font-semibold text-slate-700">{formatDate(appointment.date)}</p><p className="mt-0.5 text-xs text-slate-500">{serviceAppointmentTime(appointment)}</p></div>
+      <div><MobileLabel>Requested / assigned</MobileLabel><p className="text-sm font-semibold text-slate-700">{formatRequestDateTime(appointment.requestedAt || appointment.createdAt)}</p><p className="mt-0.5 truncate text-xs text-slate-500">{pathologistName(appointment)}</p></div>
       <div><MobileLabel>Payment</MobileLabel><PaymentBadge value={appointment.payment?.status || 'Pending'} /><p className="mt-1 text-xs font-bold text-slate-700">{formatCurrency(appointment.fees ?? appointment.payment?.amount)}</p></div>
 
       <div>
@@ -452,28 +433,13 @@ function AppointmentRow({ appointment, workingId, onStatusChange, onManage }) {
   )
 }
 
-function AppointmentModal({ appointment, busy, onClose, onReschedule, onSaveNotes, onCancel, onMarkPaid }) {
-  const [rescheduling, setRescheduling] = useState(false)
-  const [date, setDate] = useState(appointment.date || '')
-  const [time, setTime] = useState(toTwentyFourHourTime(serviceAppointmentTime(appointment)))
+function AppointmentModal({ appointment, busy, isAdmin, onClose, onSaveNotes, onCancel, onMarkPaid }) {
   const [notes, setNotes] = useState(appointment.notes || '')
-  const [formError, setFormError] = useState('')
   const [notesError, setNotesError] = useState('')
   const terminal = isTerminal(appointment.status)
   const canMarkPaid = appointment.payment?.status !== 'Paid'
     && appointment.payment?.status !== 'Refunded'
     && appointment.status !== 'Canceled'
-
-  async function submitReschedule(event) {
-    event.preventDefault()
-    if (!date || !time) {
-      setFormError('Choose both a new date and time.')
-      return
-    }
-    setFormError('')
-    const result = await onReschedule(date, time)
-    if (!result?.ok) setFormError(result?.message || 'Unable to reschedule the booking.')
-  }
 
   async function submitNotes(event) {
     event.preventDefault()
@@ -485,7 +451,7 @@ function AppointmentModal({ appointment, busy, onClose, onReschedule, onSaveNote
   return (
     <ModalShell onClose={onClose} titleId="service-booking-details-title" closeDisabled={busy}>
       <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-6">
-        <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">Service booking details</p><h2 id="service-booking-details-title" className="mt-1 text-xl font-bold text-slate-950">{patientName(appointment)}</h2><p className="mt-1 text-sm text-slate-500">Booking #{shortId(appointment)}</p></div>
+        <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">Service request details</p><h2 id="service-booking-details-title" className="mt-1 text-xl font-bold text-slate-950">{patientName(appointment)}</h2><p className="mt-1 text-sm text-slate-500">Request #{shortId(appointment)}</p></div>
         <button type="button" onClick={onClose} disabled={busy} aria-label="Close booking details" className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"><X size={18} /></button>
       </div>
 
@@ -496,42 +462,24 @@ function AppointmentModal({ appointment, busy, onClose, onReschedule, onSaveNote
           <Detail icon={UserRound} label="Patient" value={patientName(appointment)} detail={[appointment.age ? `${appointment.age} years` : '', appointment.gender].filter(Boolean).join(' / ') || 'Age and gender not provided'} />
           <Detail icon={Phone} label="Mobile" value={appointment.mobile || 'Not provided'} />
           <Detail icon={Stethoscope} label="Service" value={serviceNameFromAppointment(appointment)} />
-          <Detail icon={CalendarDays} label="Schedule" value={formatDate(appointment.date)} detail={serviceAppointmentTime(appointment)} />
+          <Detail icon={CalendarDays} label="Requested" value={formatRequestDateTime(appointment.requestedAt || appointment.createdAt)} detail="24/7 request" />
+          <Detail icon={UserRound} label="Assigned pathologist" value={pathologistName(appointment)} detail={appointment.assignedPathologistEmployeeId || appointment.assignedPathologist?.employeeId || ''} />
           <Detail icon={CreditCard} label="Payment" value={appointment.payment?.method || 'Cash'} detail={appointment.payment?.status || 'Pending'} />
           <Detail icon={WalletCards} label="Service fee" value={formatCurrency(appointment.fees ?? appointment.payment?.amount)} />
         </div>
 
-        {appointment.status === 'Rescheduled' && (
-          <div className="mt-5 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-semibold text-violet-800">Current rescheduled time: {formatDate(appointment.date)} at {serviceAppointmentTime(appointment)}.</div>
-        )}
-
         <form onSubmit={submitNotes} className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <label><span className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-700"><FileText size={16} /> Admin notes</span><textarea value={notes} onChange={(event) => { setNotes(event.target.value); setNotesError('') }} rows={3} maxLength={1000} placeholder="Add internal notes about this booking" className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50" /></label>
+          <label><span className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-700"><FileText size={16} /> Care notes</span><textarea value={notes} onChange={(event) => { setNotes(event.target.value); setNotesError('') }} rows={3} maxLength={1000} placeholder="Add internal notes about this request" className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50" /></label>
           {notesError && <p role="alert" className="mt-2 text-xs font-semibold text-rose-600">{notesError}</p>}
           <div className="mt-3 flex items-center justify-between gap-3"><span className="text-xs text-slate-400">{notes.length}/1000</span><button type="submit" disabled={busy || notes === (appointment.notes || '')} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:border-emerald-200 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">{busy ? 'Saving...' : 'Save notes'}</button></div>
         </form>
 
-        {!terminal && (
-          <div className="mt-6 border-t border-slate-100 pt-5">
-            <button type="button" onClick={() => setRescheduling((current) => !current)} className="inline-flex items-center gap-2 text-sm font-bold text-emerald-700 hover:text-emerald-800"><CalendarClock size={17} /> {rescheduling ? 'Hide reschedule form' : 'Reschedule booking'}</button>
-            {rescheduling && (
-              <form onSubmit={submitReschedule} className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label><span className="mb-2 block text-xs font-bold text-slate-600">New date</span><input type="date" value={date} min={localDateKey(new Date())} onChange={(event) => { setDate(event.target.value); setFormError('') }} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50" /></label>
-                  <label><span className="mb-2 block text-xs font-bold text-slate-600">New time</span><input type="time" value={time} onChange={(event) => { setTime(event.target.value); setFormError('') }} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50" /></label>
-                </div>
-                {formError && <p role="alert" className="mt-2 text-xs font-semibold text-rose-600">{formError}</p>}
-                <div className="mt-4 flex justify-end"><button type="submit" disabled={busy} className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60">{busy ? <LoaderCircle className="animate-spin" size={16} /> : <CalendarClock size={16} />}{busy ? 'Saving...' : 'Save new schedule'}</button></div>
-              </form>
-            )}
-          </div>
-        )}
       </div>
 
       <div className="flex flex-col gap-2 border-t border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div className="flex flex-col gap-2 sm:flex-row">
-          {!terminal && <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl px-3 text-sm font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-50"><XCircle size={16} /> Cancel booking</button>}
-          {canMarkPaid && <button type="button" onClick={onMarkPaid} disabled={busy} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl px-3 text-sm font-bold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><CreditCard size={16} /> Mark paid</button>}
+          {isAdmin && !terminal && <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl px-3 text-sm font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-50"><XCircle size={16} /> Cancel request</button>}
+          {isAdmin && canMarkPaid && <button type="button" onClick={onMarkPaid} disabled={busy} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl px-3 text-sm font-bold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><CreditCard size={16} /> Mark paid</button>}
         </div>
         <button type="button" onClick={onClose} disabled={busy} autoFocus className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Close</button>
       </div>
@@ -542,16 +490,28 @@ function AppointmentModal({ appointment, busy, onClose, onReschedule, onSaveNote
 function ConfirmActionModal({ action, busy, onClose, onConfirm }) {
   const appointment = action.appointment
   const content = actionContent(action.type, appointment)
+  const needsCashDecision = action.type === 'complete' && requiresCashPaymentDecision(appointment)
+  const [cashPaymentReceived, setCashPaymentReceived] = useState(null)
   return (
     <ModalShell onClose={onClose} titleId="confirm-service-action-title" closeDisabled={busy} size="max-w-md">
       <div className="p-6">
         <span className={`grid h-11 w-11 place-items-center rounded-xl ${content.danger ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-700'}`}>{content.danger ? <XCircle size={20} /> : action.type === 'paid' ? <CreditCard size={20} /> : <CheckCircle2 size={20} />}</span>
         <h2 id="confirm-service-action-title" className="mt-4 text-lg font-bold text-slate-950">{content.title}</h2>
         <p className="mt-2 text-sm leading-6 text-slate-500">{content.message}</p>
-        <div className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600"><span className="font-bold text-slate-800">{formatDate(appointment.date)}</span> at {serviceAppointmentTime(appointment)} for {serviceNameFromAppointment(appointment)}</div>
+        <div className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600"><span className="font-bold text-slate-800">Requested {formatRequestDateTime(appointment.requestedAt || appointment.createdAt)}</span> for {serviceNameFromAppointment(appointment)}</div>
+        {needsCashDecision && (
+          <fieldset className="mt-5">
+            <legend className="text-sm font-bold text-slate-800">Was the service fee received in cash?</legend>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Choose one before completing the service. Unpaid cash is excluded from service revenue.</p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button type="button" aria-pressed={cashPaymentReceived === true} onClick={() => setCashPaymentReceived(true)} disabled={busy} className={`rounded-xl border px-3 py-3 text-sm font-bold transition ${cashPaymentReceived === true ? 'border-emerald-500 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-100' : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300'}`}>Yes, received</button>
+              <button type="button" aria-pressed={cashPaymentReceived === false} onClick={() => setCashPaymentReceived(false)} disabled={busy} className={`rounded-xl border px-3 py-3 text-sm font-bold transition ${cashPaymentReceived === false ? 'border-amber-500 bg-amber-50 text-amber-800 ring-2 ring-amber-100' : 'border-slate-200 bg-white text-slate-700 hover:border-amber-300'}`}>No, unpaid</button>
+            </div>
+          </fieldset>
+        )}
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} disabled={busy} autoFocus className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Go back</button>
-          <button type="button" onClick={onConfirm} disabled={busy} className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60 ${content.danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>{busy && <LoaderCircle className="animate-spin" size={16} />}{busy ? 'Saving...' : content.button}</button>
+          <button type="button" onClick={() => onConfirm(cashPaymentReceived)} disabled={busy || (needsCashDecision && cashPaymentReceived === null)} className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60 ${content.danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>{busy && <LoaderCircle className="animate-spin" size={16} />}{busy ? 'Saving...' : content.button}</button>
         </div>
       </div>
     </ModalShell>
@@ -599,21 +559,21 @@ function Alert({ tone, onClose, children }) {
 }
 
 function EmptyAppointments({ filtered, clearFilters }) {
-  return <div className="grid min-h-80 place-items-center px-5 py-12 text-center"><div><span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-slate-100 text-slate-500"><CalendarDays size={24} /></span><h3 className="mt-4 text-base font-bold text-slate-900">{filtered ? 'No matching service bookings' : 'No service bookings yet'}</h3><p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">{filtered ? 'Try another search or status filter.' : 'New patient service bookings will appear here automatically.'}</p>{filtered && <button type="button" onClick={clearFilters} className="mt-4 text-sm font-bold text-emerald-700 hover:text-emerald-800">Clear filters</button>}</div></div>
+  return <div className="grid min-h-80 place-items-center px-5 py-12 text-center"><div><span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-slate-100 text-slate-500"><CalendarDays size={24} /></span><h3 className="mt-4 text-base font-bold text-slate-900">{filtered ? 'No matching service requests' : 'No service requests yet'}</h3><p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">{filtered ? 'Try another search or status filter.' : 'New patient service requests will appear here automatically.'}</p>{filtered && <button type="button" onClick={clearFilters} className="mt-4 text-sm font-bold text-emerald-700 hover:text-emerald-800">Clear filters</button>}</div></div>
 }
 
 function AppointmentSkeleton() {
-  return <div className="divide-y divide-slate-100" aria-busy="true">{[0, 1, 2, 3, 4].map((item) => <div key={item} className="mx-5 my-4 h-20 animate-pulse rounded-xl bg-slate-100" />)}<span className="sr-only">Loading service bookings</span></div>
+  return <div className="divide-y divide-slate-100" aria-busy="true">{[0, 1, 2, 3, 4].map((item) => <div key={item} className="mx-5 my-4 h-20 animate-pulse rounded-xl bg-slate-100" />)}<span className="sr-only">Loading service requests</span></div>
 }
 
 function actionContent(type, appointment) {
   if (type === 'cancel') return {
     danger: true,
-    title: 'Cancel this service booking?',
+    title: 'Cancel this service request?',
     message: appointment.payment?.status === 'Paid'
-      ? `${patientName(appointment)}'s booking will be canceled and its payment marked as refunded.`
-      : `${patientName(appointment)}'s booking will be canceled and removed from the active queue.`,
-    button: 'Cancel booking',
+      ? `${patientName(appointment)}'s request will be canceled and its payment marked as refunded.`
+      : `${patientName(appointment)}'s request will be canceled and removed from the active queue.`,
+    button: 'Cancel request',
   }
   if (type === 'paid') return {
     danger: false,
@@ -624,7 +584,7 @@ function actionContent(type, appointment) {
   return {
     danger: false,
     title: 'Mark service as completed?',
-    message: `${patientName(appointment)}'s booking will be closed as completed and included in completed-service revenue.`,
+    message: `${patientName(appointment)}'s booking will be closed as completed. Only completed services marked paid are added to service revenue.`,
     button: 'Mark completed',
   }
 }
@@ -633,34 +593,28 @@ function patientName(appointment) {
   return appointment?.patientName || appointment?.patient?.name || 'Unknown patient'
 }
 
+function pathologistName(appointment) {
+  return appointment?.assignedPathologist?.name || appointment?.assignedPathologistName || 'Awaiting pathologist assignment'
+}
+
+function formatRequestDateTime(value) {
+  if (!value) return 'Recently'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Recently'
+  return date.toLocaleString('en-BD', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
 function isTerminal(status) {
   return status === 'Completed' || status === 'Canceled'
+}
+
+function requiresCashPaymentDecision(appointment) {
+  return appointment?.payment?.method === 'Cash'
+    && appointment?.payment?.status !== 'Paid'
+    && Number(appointment?.fees ?? appointment?.payment?.amount ?? 0) > 0
 }
 
 function shortId(appointment) {
   const id = String(getId(appointment) || 'pending')
   return id.slice(-8).toUpperCase()
-}
-
-function toTwelveHourTime(value) {
-  const [rawHour, minute] = value.split(':')
-  const hour = Number(rawHour)
-  const suffix = hour >= 12 ? 'PM' : 'AM'
-  return `${String(hour % 12 || 12).padStart(2, '0')}:${minute} ${suffix}`
-}
-
-function toTwentyFourHourTime(value = '') {
-  const match = String(value).trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)
-  if (!match) return /^\d{2}:\d{2}$/.test(value) ? value : ''
-  const [, rawHour, minute, suffix] = match
-  let hour = Number(rawHour) % 12
-  if (suffix.toUpperCase() === 'PM') hour += 12
-  return `${String(hour).padStart(2, '0')}:${minute}`
-}
-
-function localDateKey(date) {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
 }

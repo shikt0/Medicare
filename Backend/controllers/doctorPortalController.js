@@ -1,4 +1,6 @@
 import Appointment from '../models/Appointment.js'
+import { evaluateCashPaymentOnCompletion } from '../utils/cashCompletion.js'
+import { normalizeWeeklySchedule } from '../utils/weeklySchedule.js'
 
 const APPOINTMENT_STATUSES = ['Pending', 'Confirmed', 'Completed', 'Canceled', 'Rescheduled']
 
@@ -9,7 +11,7 @@ function doctorId(req) {
 function serializeDoctor(doctor) {
   const value = doctor?.toObject ? doctor.toObject({ flattenMaps: true }) : { ...doctor }
   delete value.password
-  value.schedule = value.schedule && typeof value.schedule === 'object' ? value.schedule : {}
+  value.schedule = normalizeWeeklySchedule(value.schedule)
   return value
 }
 
@@ -70,7 +72,7 @@ export async function updateDoctorPortalAppointment(req, res) {
     const appointment = await Appointment.findOne({ _id: req.params.id, doctorId: doctorId(req) })
     if (!appointment) return res.status(404).json({ success: false, message: 'Appointment not found' })
 
-    const { status, date, time, doctorNotes } = req.body || {}
+    const { status, date, time, doctorNotes, cashPaymentReceived } = req.body || {}
     const terminal = ['Completed', 'Canceled'].includes(appointment.status)
 
     if (status !== undefined) {
@@ -79,6 +81,22 @@ export async function updateDoctorPortalAppointment(req, res) {
       }
       if (terminal && status !== appointment.status) {
         return res.status(400).json({ success: false, message: 'Completed or canceled appointments cannot be reopened' })
+      }
+      if (status === 'Completed' && appointment.status !== 'Completed') {
+        const cashDecision = evaluateCashPaymentOnCompletion(appointment, cashPaymentReceived)
+        if (!cashDecision.ok) return res.status(400).json({ success: false, message: cashDecision.message })
+        if (cashDecision.requiresDecision) {
+          appointment.payment.status = cashDecision.paymentStatus
+          appointment.payment.amount = cashDecision.amount
+          appointment.paidAt = cashDecision.paidAt
+          appointment.payment.meta = {
+            ...(appointment.payment.meta || {}),
+            cashReceived: cashDecision.cashPaymentReceived,
+            cashConfirmedAt: cashDecision.confirmedAt,
+            cashConfirmedBy: doctorId(req),
+          }
+          appointment.markModified('payment.meta')
+        }
       }
       appointment.status = status
     }
@@ -115,4 +133,3 @@ export async function updateDoctorPortalAppointment(req, res) {
     return res.status(500).json({ success: false, message: 'Unable to update appointment' })
   }
 }
-

@@ -1,5 +1,5 @@
-import React from 'react'
-import { Route, Routes } from 'react-router-dom'
+import React, { useEffect } from 'react'
+import { Route, Routes, useLocation } from 'react-router-dom'
 import AddDoctor from './pages/AddDoctor'
 import DoctorsList from './pages/DoctorsList'
 import Appointments from './pages/Appointments'
@@ -23,10 +23,12 @@ import Recruitment from './pages/Recruitment'
 import AnnouncementManagement from './pages/AnnouncementManagement'
 import FreelancerAssignments from './pages/FreelancerAssignments'
 import StaffLoginLanding from './pages/StaffLoginLanding'
+import { useStaffAuth } from './auth/staffAuth'
 
 const App = () => {
   return (
     <StaffAuthProvider>
+      <PortalDocumentTitle />
       <Routes>
         <Route path="/login" element={<StaffLoginLanding />} />
         <Route path="/nurse/login/*" element={<WorkforceAuth expectedRole="nurse" />} />
@@ -66,6 +68,7 @@ const App = () => {
         <Route element={<ProtectedRoute allowedRoles={['pathologist']} />}>
           <Route element={<AdminLayout />}>
             <Route path="/pathologist-portal" element={<PortalHome />} />
+            <Route path="/pathologist-portal/service-requests" element={<ServiceAppointments />} />
             <Route path="/pathologist-portal/laboratory" element={<Laboratory />} />
             <Route path="/pathologist-portal/announcements" element={<MyAnnouncements />} />
             <Route path="/pathologist-portal/profile" element={<MyProfile />} />
@@ -102,6 +105,32 @@ const App = () => {
 };
 
 export default App
+
+const roleTitles = {
+  nurse: 'MediCare Nurse Portal',
+  pathologist: 'MediCare Pathologist Portal',
+  hr: 'MediCare HR Portal',
+  freelancer: 'MediCare Freelancer Portal',
+  admin: 'MediCare Admin',
+}
+
+function PortalDocumentTitle() {
+  const location = useLocation()
+  const { actor, localAdminBypass } = useStaffAuth()
+  const pathRole = ['nurse', 'pathologist', 'hr', 'freelancer'].find((role) => (
+    location.pathname.startsWith(`/${role}/`) || location.pathname.startsWith(`/${role}-portal`)
+  ))
+
+  useEffect(() => {
+    if (pathRole) document.title = roleTitles[pathRole]
+    else if (location.pathname === '/login') document.title = 'MediCare Login Portals'
+    else if (location.pathname === '/unauthorized') document.title = 'MediCare Access Restricted'
+    else if (localAdminBypass || actor?.role === 'admin') document.title = roleTitles.admin
+    else document.title = 'MediCare Staff Portal'
+  }, [actor?.role, localAdminBypass, location.pathname, pathRole])
+
+  return null
+}
 
 function PortalPage({ title }) {
   return (

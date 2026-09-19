@@ -141,8 +141,8 @@ function AppointmentCard({ item, onCancel }) {
     <article className="patient-appointment-card">
       <div className="patient-appointment-card__image"><ImageWithFallback src={appointmentImage(item, service ? 'service' : 'doctor')} alt={name} initials={service ? 'MC' : initials(name)} /><span>{service ? <Stethoscope size={14} /> : <CalendarDays size={14} />}{item.kind}</span></div>
       <div className="patient-appointment-card__main"><div><p>{detail}</p><h2>{name}</h2></div><span className={statusClass(item.status)}><i />{item.status || 'Pending'}</span></div>
-      <div className="patient-appointment-card__details"><span><CalendarDays size={16} /><small>Date</small><strong>{formatDate(item.date)}</strong></span><span><Clock3 size={16} /><small>Time</small><strong>{formatAppointmentTime(item)}</strong></span><span><span className="appointment-money">৳</span><small>Fee</small><strong>{formatCurrency(item.fees)}</strong></span><span><ShieldCheck size={16} /><small>Payment</small><strong>{item.payment?.method || 'Cash'} · {item.payment?.status || 'Pending'}</strong></span></div>
-      <div className="patient-appointment-card__footer"><p>Booked {formatCreatedAt(item.createdAt)}</p>{!terminal && <button type="button" onClick={onCancel}>Cancel appointment</button>}</div>
+      <div className="patient-appointment-card__details">{service ? <><span><CalendarDays size={16} /><small>Requested</small><strong>{formatRequestDateTime(item.requestedAt || item.createdAt)}</strong></span><span><Clock3 size={16} /><small>Assigned pathologist</small><strong>{item.assignedPathologistName || 'Assignment pending'}</strong></span></> : <><span><CalendarDays size={16} /><small>Date</small><strong>{formatDate(item.date)}</strong></span><span><Clock3 size={16} /><small>Time</small><strong>{formatAppointmentTime(item)}</strong></span></>}<span><span className="appointment-money">৳</span><small>Fee</small><strong>{formatCurrency(item.fees)}</strong></span><span><ShieldCheck size={16} /><small>Payment</small><strong>{item.payment?.method || 'Cash'} · {item.payment?.status || 'Pending'}</strong></span></div>
+      <div className="patient-appointment-card__footer"><p>{service ? 'Requested' : 'Booked'} {formatCreatedAt(item.requestedAt || item.createdAt)}</p>{!terminal && <button type="button" onClick={onCancel}>Cancel {service ? 'request' : 'appointment'}</button>}</div>
     </article>
   )
 }
@@ -152,12 +152,21 @@ function Summary({ icon: Icon, label, value, tone }) {
 }
 
 function CancelModal({ item, canceling, onClose, onConfirm }) {
-  return <div className="patient-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-title"><button type="button" className="patient-modal__backdrop" onClick={onClose} aria-label="Close" /><div className="patient-modal__panel"><span className="patient-modal__warning"><XCircle size={23} /></span><h2 id="cancel-title">Cancel this appointment?</h2><p>This will cancel your {item.kind.toLowerCase()} booking on {formatDate(item.date)} at {formatAppointmentTime(item)}.</p><div><button type="button" onClick={onClose} disabled={canceling}>Keep appointment</button><button type="button" onClick={onConfirm} disabled={canceling}>{canceling && <LoaderCircle size={16} className="animate-spin" />}{canceling ? 'Canceling...' : 'Yes, cancel'}</button></div></div></div>
+  const service = item.kind === 'Service'
+  return <div className="patient-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-title"><button type="button" className="patient-modal__backdrop" onClick={onClose} aria-label="Close" /><div className="patient-modal__panel"><span className="patient-modal__warning"><XCircle size={23} /></span><h2 id="cancel-title">Cancel this {service ? 'service request' : 'appointment'}?</h2><p>{service ? `This will remove your 24/7 service request submitted ${formatRequestDateTime(item.requestedAt || item.createdAt)}.` : `This will cancel your doctor booking on ${formatDate(item.date)} at ${formatAppointmentTime(item)}.`}</p><div><button type="button" onClick={onClose} disabled={canceling}>Keep {service ? 'request' : 'appointment'}</button><button type="button" onClick={onConfirm} disabled={canceling}>{canceling && <LoaderCircle size={16} className="animate-spin" />}{canceling ? 'Canceling...' : 'Yes, cancel'}</button></div></div></div>
 }
 
 function appointmentTimestamp(item) {
+  if (item.kind === 'Service') return new Date(item.requestedAt || item.createdAt || 0).getTime()
   const date = new Date(`${item.date || '1970-01-01'}T00:00:00`)
   return Number.isNaN(date.getTime()) ? new Date(item.createdAt || 0).getTime() : date.getTime()
+}
+
+function formatRequestDateTime(value) {
+  if (!value) return 'Recently'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Recently'
+  return date.toLocaleString('en-BD', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
 function formatCreatedAt(value) {

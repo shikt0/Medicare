@@ -17,7 +17,6 @@ import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { formatCurrency, getId } from '../lib/format'
 
-const AVAILABILITY_FILTERS = ['All', 'Available', 'Unavailable']
 const initialSummary = {
   totalAppointments: 0,
   pending: 0,
@@ -37,7 +36,6 @@ export default function ServiceDashboard() {
   const [error, setError] = useState('')
   const [lastUpdated, setLastUpdated] = useState(null)
   const [query, setQuery] = useState('')
-  const [availability, setAvailability] = useState('All')
   const [sort, setSort] = useState('appointments')
   const [visibleCount, setVisibleCount] = useState(10)
   const [expandedId, setExpandedId] = useState('')
@@ -83,12 +81,10 @@ export default function ServiceDashboard() {
   const filteredServices = useMemo(() => {
     const keyword = query.trim().toLowerCase()
     const filtered = services.filter((service) => {
-      const matchesAvailability = availability === 'All'
-        || (availability === 'Available' ? isServiceAvailable(service) : !isServiceAvailable(service))
       const matchesQuery = !keyword || [service.name, service.shortDescription, service.about]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(keyword))
-      return matchesAvailability && matchesQuery
+      return matchesQuery
     })
 
     return [...filtered].sort((first, second) => {
@@ -98,18 +94,13 @@ export default function ServiceDashboard() {
       if (sort === 'name') return serviceName(first).localeCompare(serviceName(second))
       return number(second.totalAppointments) - number(first.totalAppointments)
     })
-  }, [availability, query, services, sort])
+  }, [query, services, sort])
 
   const visibleServices = filteredServices.slice(0, visibleCount)
   const topService = [...services].sort((first, second) => number(second.totalAppointments) - number(first.totalAppointments))[0]
 
   function updateQuery(value) {
     setQuery(value)
-    setVisibleCount(10)
-  }
-
-  function updateAvailability(value) {
-    setAvailability(value)
     setVisibleCount(10)
   }
 
@@ -125,7 +116,7 @@ export default function ServiceDashboard() {
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-emerald-600">Service analytics</p>
             <h1 className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">Service overview</h1>
-            <p className="mt-2 text-sm text-slate-500">Track service availability, booking performance, completion, and revenue.</p>
+            <p className="mt-2 text-sm text-slate-500">Track 24/7 service requests, completion, and revenue.</p>
           </div>
           <div className="flex items-center gap-2">
             {lastUpdated && (
@@ -155,25 +146,24 @@ export default function ServiceDashboard() {
         )}
 
         <section aria-label="Service summary" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard icon={Stethoscope} label="Services" value={services.length} detail={`${summary.availableServices} available to book`} tone="sky" />
-          <SummaryCard icon={CalendarDays} label="Service bookings" value={summary.totalAppointments} detail={`${summary.pending} currently pending`} tone="violet" />
+          <SummaryCard icon={Stethoscope} label="Services" value={services.length} detail="All open 24/7" tone="sky" />
+          <SummaryCard icon={CalendarDays} label="Service requests" value={summary.totalAppointments} detail={`${summary.pending} currently pending`} tone="violet" />
           <SummaryCard icon={CheckCircle2} label="Completed" value={summary.completed} detail={`${summary.completionRate}% completion rate`} tone="emerald" />
-          <SummaryCard icon={WalletCards} label="Completed revenue" value={formatCurrency(summary.earning)} detail="Recorded fees from completed bookings" tone="amber" />
+          <SummaryCard icon={WalletCards} label="Service revenue" value={formatCurrency(summary.earning)} detail="Completed requests marked paid" tone="amber" />
         </section>
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,.75fr)]">
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">Booking status</h2>
-                <p className="mt-1 text-sm text-slate-500">All service appointments grouped by their current state.</p>
+                <h2 className="text-lg font-bold text-slate-900">Request status</h2>
+                <p className="mt-1 text-sm text-slate-500">All 24/7 service requests grouped by their current state.</p>
               </div>
               <Activity className="text-emerald-600" size={21} />
             </div>
             <div className="mt-6 space-y-4">
               <StatusProgress label="Pending" value={summary.pending} total={summary.totalAppointments} color="bg-amber-500" />
               <StatusProgress label="Confirmed" value={summary.confirmed} total={summary.totalAppointments} color="bg-sky-500" />
-              <StatusProgress label="Rescheduled" value={summary.rescheduled} total={summary.totalAppointments} color="bg-violet-500" />
               <StatusProgress label="Completed" value={summary.completed} total={summary.totalAppointments} color="bg-emerald-500" />
               <StatusProgress label="Canceled" value={summary.canceled} total={summary.totalAppointments} color="bg-rose-500" />
             </div>
@@ -188,7 +178,7 @@ export default function ServiceDashboard() {
                 <p className="mt-2 text-sm text-emerald-50">{number(topService.totalAppointments)} bookings · {completionRate(topService)}% completed</p>
                 <div className="mt-6 flex items-end justify-between gap-4 border-t border-white/15 pt-5">
                   <div>
-                    <p className="text-xs text-emerald-100">Completed revenue</p>
+                    <p className="text-xs text-emerald-100">Paid service revenue</p>
                     <p className="mt-1 text-xl font-bold">{formatCurrency(topService.earning)}</p>
                   </div>
                   <p className="rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold">{formatCurrency(topService.price)}</p>
@@ -242,19 +232,6 @@ export default function ServiceDashboard() {
               </div>
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              {AVAILABILITY_FILTERS.map((filter) => (
-                <button
-                  key={filter}
-                  type="button"
-                  onClick={() => updateAvailability(filter)}
-                  aria-pressed={availability === filter}
-                  className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition ${availability === filter ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800'}`}
-                >
-                  {filter}
-                </button>
-              ))}
-            </div>
           </div>
 
           <div className="hidden grid-cols-[minmax(14rem,1.25fr)_minmax(7rem,.55fr)_minmax(7rem,.6fr)_minmax(10rem,.9fr)_minmax(8rem,.7fr)_2.5rem] items-center gap-4 border-b border-slate-100 bg-slate-50 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 xl:grid">
@@ -264,10 +241,7 @@ export default function ServiceDashboard() {
           {loading ? (
             <ServiceSkeleton />
           ) : visibleServices.length === 0 ? (
-            <EmptyServices filtered={Boolean(query || availability !== 'All')} clearFilters={() => {
-              updateQuery('')
-              updateAvailability('All')
-            }} />
+            <EmptyServices filtered={Boolean(query)} clearFilters={() => updateQuery('')} />
           ) : (
             <div className="divide-y divide-slate-100">
               {visibleServices.map((service) => {
@@ -299,7 +273,6 @@ export default function ServiceDashboard() {
 
 function ServiceRow({ service, expanded, onToggle }) {
   const rate = completionRate(service)
-  const schedule = serviceSchedule(service)
 
   return (
     <article>
@@ -311,7 +284,7 @@ function ServiceRow({ service, expanded, onToggle }) {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <p className="truncate text-sm font-bold text-slate-900">{serviceName(service)}</p>
-                <AvailabilityBadge available={isServiceAvailable(service)} />
+                <AvailabilityBadge />
               </div>
               <p className="mt-1 line-clamp-1 text-xs text-slate-500">{service.shortDescription || service.about || 'No description added'}</p>
             </div>
@@ -359,27 +332,7 @@ function ServiceRow({ service, expanded, onToggle }) {
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">About this service</p>
               <p className="mt-2 text-sm leading-6 text-slate-600">{service.about || service.shortDescription || 'No service description has been added.'}</p>
 
-              <div className="mt-5">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Available schedule</p>
-                  <span className="text-xs font-semibold text-slate-500">{schedule.totalSlots} slots</span>
-                </div>
-                {schedule.entries.length === 0 ? (
-                  <p className="mt-2 text-sm text-slate-500">No service slots configured.</p>
-                ) : (
-                  <div className="mt-3 space-y-3">
-                    {schedule.entries.slice(0, 4).map(([date, slots]) => (
-                      <div key={date} className="grid gap-2 sm:grid-cols-[8rem_minmax(0,1fr)]">
-                        <p className="text-xs font-bold text-slate-600">{formatServiceDate(date)}</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {slots.map((slot) => <span key={slot} className="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200">{slot}</span>)}
-                        </div>
-                      </div>
-                    ))}
-                    {schedule.entries.length > 4 && <p className="text-xs font-semibold text-slate-400">+ {schedule.entries.length - 4} more available dates</p>}
-                  </div>
-                )}
-              </div>
+              <div className="mt-5 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3"><p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Availability</p><p className="mt-1 text-sm font-semibold text-emerald-900">Open 24/7 · Requests are assigned automatically</p></div>
             </div>
 
             <div>
@@ -442,10 +395,10 @@ function ServiceImage({ service }) {
   return <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-700 ring-1 ring-violet-100"><Stethoscope size={19} /></span>
 }
 
-function AvailabilityBadge({ available }) {
+function AvailabilityBadge() {
   return (
-    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${available ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${available ? 'bg-emerald-500' : 'bg-slate-400'}`} />{available ? 'Available' : 'Unavailable'}
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Open 24/7
     </span>
   )
 }
@@ -460,7 +413,7 @@ function EmptyServices({ filtered, clearFilters }) {
       <div>
         <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-slate-100 text-slate-500"><Stethoscope size={24} /></span>
         <h3 className="mt-4 text-base font-bold text-slate-900">{filtered ? 'No matching services' : 'No services yet'}</h3>
-        <p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">{filtered ? 'Try another search or availability filter.' : 'Add the first service to begin tracking booking performance.'}</p>
+        <p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">{filtered ? 'Try another search.' : 'Add the first 24/7 service to begin tracking request performance.'}</p>
         {filtered ? (
           <button type="button" onClick={clearFilters} className="mt-4 text-sm font-bold text-emerald-700 hover:text-emerald-800">Clear filters</button>
         ) : (
@@ -509,7 +462,6 @@ function buildSummary(services, serverSummary, hasServerStats) {
   const totalAppointments = number(base.totalAppointments)
   return {
     ...base,
-    availableServices: services.filter(isServiceAvailable).length,
     completionRate: totalAppointments ? Math.round((number(base.completed) / totalAppointments) * 100) : 0,
   }
 }
@@ -518,29 +470,9 @@ function serviceName(service) {
   return service?.name || 'Unnamed service'
 }
 
-function isServiceAvailable(service) {
-  const value = service?.available ?? service?.availability
-  if (typeof value === 'boolean') return value
-  return !['false', 'unavailable'].includes(String(value ?? 'true').toLowerCase())
-}
-
 function completionRate(service) {
   const total = number(service.totalAppointments)
   return total ? Math.round((number(service.completed) / total) * 100) : 0
-}
-
-function serviceSchedule(service) {
-  const slots = service?.slots && typeof service.slots === 'object' ? service.slots : {}
-  const entries = Object.entries(slots)
-    .filter(([, values]) => Array.isArray(values) && values.length)
-    .sort(([first], [second]) => first.localeCompare(second))
-  return { entries, totalSlots: entries.reduce((total, [, values]) => total + values.length, 0) }
-}
-
-function formatServiceDate(value) {
-  const date = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString('en-BD', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 function number(value) {

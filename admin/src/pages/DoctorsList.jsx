@@ -21,6 +21,15 @@ import { api } from '../lib/api'
 import { formatCurrency, getId } from '../lib/format'
 
 const FILTERS = ['All', 'Available', 'Unavailable']
+const WEEK_DAYS = [
+  { key: 'monday', label: 'Monday' },
+  { key: 'tuesday', label: 'Tuesday' },
+  { key: 'wednesday', label: 'Wednesday' },
+  { key: 'thursday', label: 'Thursday' },
+  { key: 'friday', label: 'Friday' },
+  { key: 'saturday', label: 'Saturday' },
+  { key: 'sunday', label: 'Sunday' },
+]
 
 export default function DoctorsList() {
   const [doctors, setDoctors] = useState([])
@@ -371,8 +380,8 @@ function DoctorCard({ doctor, expanded, onToggle, onDelete }) {
 
           <div className="mt-5">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Upcoming schedule</p>
-              <span className="text-xs font-semibold text-slate-500">{schedule.reduce((total, [, slots]) => total + slots.length, 0)} slots</span>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Weekly schedule</p>
+              <span className="text-xs font-semibold text-slate-500">{schedule.reduce((total, [, slots]) => total + slots.length, 0)} recurring slots</span>
             </div>
             {schedule.length === 0 ? (
               <p className="mt-2 text-sm text-slate-500">No appointment slots configured.</p>
@@ -380,7 +389,7 @@ function DoctorCard({ doctor, expanded, onToggle, onDelete }) {
               <div className="mt-3 space-y-3">
                 {schedule.slice(0, 4).map(([date, slots]) => (
                   <div key={date} className="grid gap-2 sm:grid-cols-[8rem_minmax(0,1fr)]">
-                    <p className="text-xs font-bold text-slate-600">{formatScheduleDate(date)}</p>
+                    <p className="text-xs font-bold text-slate-600">{formatScheduleDay(date)}</p>
                     <div className="flex flex-wrap gap-1.5">
                       {slots.map((slot) => (
                         <span key={slot} className="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200">{slot}</span>
@@ -388,7 +397,7 @@ function DoctorCard({ doctor, expanded, onToggle, onDelete }) {
                     </div>
                   </div>
                 ))}
-                {schedule.length > 4 && <p className="text-xs font-semibold text-slate-400">+ {schedule.length - 4} more scheduled dates</p>}
+                {schedule.length > 4 && <p className="text-xs font-semibold text-slate-400">+ {schedule.length - 4} more scheduled weekdays</p>}
               </div>
             )}
           </div>
@@ -596,15 +605,13 @@ function initials(name) {
 
 function scheduleEntries(schedule) {
   if (!schedule || typeof schedule !== 'object') return []
-  return Object.entries(schedule)
+  return WEEK_DAYS
+    .map((day) => [day.key, schedule[day.key] || []])
     .filter(([, slots]) => Array.isArray(slots) && slots.length)
-    .sort(([first], [second]) => first.localeCompare(second))
 }
 
-function formatScheduleDate(value) {
-  const date = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString('en-BD', { month: 'short', day: 'numeric', year: 'numeric' })
+function formatScheduleDay(value) {
+  return WEEK_DAYS.find((day) => day.key === value)?.label || value
 }
 
 function loadedDetail(loaded, total) {

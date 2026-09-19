@@ -17,7 +17,6 @@ import {
   formatCurrency,
   formatDate,
   getId,
-  serviceAppointmentTime,
   serviceNameFromAppointment,
 } from '../lib/format'
 import { StatusBadge } from '../components/AdminUi'
@@ -39,6 +38,7 @@ const initialDashboard = {
   serviceAppointmentMeta: {},
   appointmentStats: {},
   serviceStats: [],
+  serviceSummary: {},
   workforceStats: {},
 }
 
@@ -96,6 +96,7 @@ export default function Hero() {
             next.appointmentStats = payload.stats || {}
           } else if (key === 'serviceStats') {
             next.serviceStats = payload.services || []
+            next.serviceSummary = payload.summary || {}
           } else if (key === 'workforceStats') {
             next.workforceStats = payload || {}
           } else {
@@ -193,7 +194,7 @@ export default function Hero() {
           </div>
         )}
 
-        <section aria-label="Dashboard summary" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section aria-label="Dashboard summary" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <SummaryCard
             icon={CalendarDays}
             label="Total bookings"
@@ -212,15 +213,22 @@ export default function Hero() {
             icon={Activity}
             label="Services"
             value={dashboard.services.length.toLocaleString()}
-            detail={`${summary.availableServices} available to book`}
+            detail="Open for requests 24/7"
             color="violet"
           />
           <SummaryCard
-            icon={WalletCards}
-            label="Revenue"
-            value={formatCurrency(summary.revenue)}
-            detail="Paid and completed bookings"
+            icon={Stethoscope}
+            label="Doctor-visit revenue"
+            value={formatCurrency(summary.doctorRevenue)}
+            detail="Completed doctor visits marked paid"
             color="amber"
+          />
+          <SummaryCard
+            icon={WalletCards}
+            label="Service revenue"
+            value={formatCurrency(summary.serviceRevenue)}
+            detail="Completed services marked paid"
+            color="emerald"
           />
         </section>
 
@@ -449,7 +457,7 @@ function ServicePerformance({ services }) {
                   <p className="shrink-0 text-sm font-bold text-slate-800">{service.totalAppointments || 0}</p>
                 </div>
                 <div className="mt-1.5 flex items-center justify-between gap-3 text-xs text-slate-500">
-                  <span>{service.available === false ? 'Unavailable' : 'Available'}</span>
+                  <span>Open 24/7</span>
                   <span>{formatCurrency(service.earning || 0)}</span>
                 </div>
               </div>
@@ -475,10 +483,14 @@ function buildSummary(dashboard) {
 
   const doctorTotal = Number(dashboard.appointmentMeta.total ?? dashboard.appointmentStats.total ?? dashboard.appointments.length)
   const serviceTotal = Number(dashboard.serviceAppointmentMeta.total ?? dashboard.serviceAppointments.length)
-  const doctorRevenue = finiteNumber(dashboard.appointmentStats.revenue)
-  const serviceRevenue = dashboard.serviceStats.reduce((total, service) => total + finiteNumber(service.earning), 0)
   const fallbackDoctorRevenue = collectedRevenue(dashboard.appointments)
   const fallbackServiceRevenue = collectedRevenue(dashboard.serviceAppointments)
+  const doctorRevenue = Number.isFinite(Number(dashboard.appointmentStats.revenue))
+    ? finiteNumber(dashboard.appointmentStats.revenue)
+    : fallbackDoctorRevenue
+  const serviceRevenue = Number.isFinite(Number(dashboard.serviceSummary.earning))
+    ? finiteNumber(dashboard.serviceSummary.earning)
+    : fallbackServiceRevenue
   const today = localDateKey(new Date())
 
   const services = dashboard.services
@@ -495,8 +507,9 @@ function buildSummary(dashboard) {
     totalAppointments: doctorTotal + serviceTotal,
     todayAppointments: allAppointments.filter((item) => item.date === today).length,
     availableDoctors: dashboard.doctors.filter(isDoctorAvailable).length,
-    availableServices: dashboard.services.filter((service) => service.available !== false).length,
-    revenue: (doctorRevenue || fallbackDoctorRevenue) + (serviceRevenue || fallbackServiceRevenue),
+    availableServices: dashboard.services.length,
+    doctorRevenue,
+    serviceRevenue,
     services,
   }
 }
@@ -555,7 +568,8 @@ function AppointmentRow({ appointment }) {
   const isDoctor = appointment.kind === 'Doctor'
   const name = appointment.patientName || appointment.patient?.name || 'Unknown patient'
   const provider = isDoctor ? doctorNameFromAppointment(appointment) : serviceNameFromAppointment(appointment)
-  const time = isDoctor ? appointment.time || '-' : serviceAppointmentTime(appointment)
+  const requestTime = new Date(appointment.requestedAt || appointment.createdAt || 0)
+  const serviceRequestedAt = Number.isNaN(requestTime.getTime()) ? 'Recently' : requestTime.toLocaleString('en-BD', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
   return (
     <article className="px-5 py-4 transition hover:bg-slate-50/80">
@@ -572,8 +586,8 @@ function AppointmentRow({ appointment }) {
             <StatusBadge value={normalizeStatus(appointment.status)} />
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-            <span>{formatDate(appointment.date)}</span>
-            <span>{time}</span>
+            <span>{isDoctor ? formatDate(appointment.date) : serviceRequestedAt}</span>
+            <span>{isDoctor ? appointment.time || '-' : appointment.assignedPathologistName || 'Assignment pending'}</span>
             <span className="font-bold text-slate-700">{formatCurrency(appointmentFee(appointment))}</span>
             <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold">{appointment.kind}</span>
           </div>
@@ -663,8 +677,8 @@ function appointmentFee(item) {
 function collectedRevenue(appointments) {
   return appointments.reduce((total, item) => {
     const paid = item.payment?.status === 'Paid'
-    const completedCash = item.payment?.method === 'Cash' && normalizeStatus(item.status) === 'Completed'
-    return paid || completedCash ? total + appointmentFee(item) : total
+    const completed = normalizeStatus(item.status) === 'Completed'
+    return paid && completed ? total + appointmentFee(item) : total
   }, 0)
 }
 

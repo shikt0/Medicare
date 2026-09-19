@@ -6,6 +6,7 @@ import FreelancerAssignment from '../models/FreelancerAssignment.js'
 import JobOpening from '../models/JobOpening.js'
 import LabTestOrder from '../models/LabTestOrder.js'
 import Shift from '../models/Shift.js'
+import ServiceAppointment from '../models/serviceAppointment.js'
 import Staff, { STAFF_ROLES } from '../models/Staff.js'
 import { relevantFilter } from './announcementController.js'
 import { localDateKey } from '../utils/validation.js'
@@ -43,12 +44,18 @@ export async function getRoleDashboard(req, res) {
       }, 0)
       data = { ...data, todayShifts, upcomingShifts, weekHours, unreadAnnouncements: unread }
     } else if (role === 'pathologist') {
-      const [assigned, urgent, processing, completed] = await Promise.all([
+      const [labAssigned, serviceAssigned, urgent, labProcessing, serviceProcessing, labCompleted, serviceCompleted] = await Promise.all([
         LabTestOrder.countDocuments({ assignedPathologist: req.actor.staffId, status: { $nin: ['completed', 'cancelled'] } }),
+        ServiceAppointment.countDocuments({ assignedPathologist: req.actor.staffId, status: { $nin: ['Completed', 'Canceled'] } }),
         LabTestOrder.countDocuments({ assignedPathologist: req.actor.staffId, priority: 'urgent', status: { $nin: ['completed', 'cancelled'] } }),
         LabTestOrder.countDocuments({ assignedPathologist: req.actor.staffId, status: 'processing' }),
+        ServiceAppointment.countDocuments({ assignedPathologist: req.actor.staffId, status: 'Confirmed' }),
         LabTestOrder.countDocuments({ assignedPathologist: req.actor.staffId, status: 'completed' }),
+        ServiceAppointment.countDocuments({ assignedPathologist: req.actor.staffId, status: 'Completed' }),
       ])
+      const assigned = labAssigned + serviceAssigned
+      const processing = labProcessing + serviceProcessing
+      const completed = labCompleted + serviceCompleted
       data = { ...data, assigned, urgent, processing, completed }
     } else if (role === 'hr') {
       const monthAgo = new Date(); monthAgo.setDate(monthAgo.getDate() - 30)

@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  CalendarDays,
   Check,
   CheckCircle2,
-  Clock3,
   ImagePlus,
   ListChecks,
   LoaderCircle,
@@ -20,17 +18,12 @@ const initialForm = {
   shortDescription: '',
   about: '',
   price: '',
-  availability: 'Available',
   imageUrl: '',
 }
 
 export default function AddService() {
   const [form, setForm] = useState(initialForm)
   const [instructions, setInstructions] = useState([{ id: 1, text: '' }])
-  const [schedule, setSchedule] = useState({})
-  const [slotDate, setSlotDate] = useState('')
-  const [slotTime, setSlotTime] = useState('')
-  const [slotError, setSlotError] = useState('')
   const [image, setImage] = useState(null)
   const [imagePreview, setImagePreview] = useState('')
   const [errors, setErrors] = useState({})
@@ -43,8 +36,6 @@ export default function AddService() {
 
   useEffect(() => () => revokePreviewUrl(objectUrlRef), [])
 
-  const scheduleEntries = Object.entries(schedule).sort(([first], [second]) => first.localeCompare(second))
-  const totalSlots = scheduleEntries.reduce((total, [, slots]) => total + slots.length, 0)
   const cleanInstructions = instructions.map((item) => item.text.trim()).filter(Boolean)
   const previewImage = imagePreview || form.imageUrl.trim()
 
@@ -110,44 +101,10 @@ export default function AddService() {
     })
   }
 
-  function addScheduleSlot() {
-    if (!slotDate || !slotTime) {
-      setSlotError('Choose both a date and a time.')
-      return
-    }
-
-    const label = toTwelveHourTime(slotTime)
-    if ((schedule[slotDate] || []).includes(label)) {
-      setSlotError('That time is already available on this date.')
-      return
-    }
-
-    setSchedule((current) => ({
-      ...current,
-      [slotDate]: [...(current[slotDate] || []), label].sort(compareTimeSlots),
-    }))
-    setSlotError('')
-    setSlotTime('')
-  }
-
-  function removeScheduleSlot(date, slot) {
-    setSchedule((current) => {
-      const remaining = current[date].filter((item) => item !== slot)
-      const next = { ...current }
-      if (remaining.length) next[date] = remaining
-      else delete next[date]
-      return next
-    })
-  }
-
   function resetForm() {
     setForm(initialForm)
     setInstructions([{ id: 1, text: '' }])
     instructionIdRef.current = 2
-    setSchedule({})
-    setSlotDate('')
-    setSlotTime('')
-    setSlotError('')
     setErrors({})
     setMessage({ type: '', text: '' })
     clearImage()
@@ -171,7 +128,6 @@ export default function AddService() {
       const formData = new FormData()
       appendFormFields(formData, trimValues(form))
       formData.set('instructions', JSON.stringify(cleanInstructions))
-      formData.set('slots', JSON.stringify(schedule))
       if (image) formData.set('image', image)
 
       const response = await api.createService(formData)
@@ -192,7 +148,7 @@ export default function AddService() {
         <header className="page-heading mb-7">
           <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-emerald-600">Service management</p>
           <h1 className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">Add a service</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Create a bookable care service with pricing, patient guidance, imagery, and available appointment slots.</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Create a care service with pricing, patient guidance, imagery, and 24/7 request availability.</p>
         </header>
 
         {message.text && <FormMessage message={message} onClose={() => setMessage({ type: '', text: '' })} />}
@@ -224,10 +180,6 @@ export default function AddService() {
                   prefix="৳"
                   required
                 />
-                <SelectField label="Availability" name="availability" value={form.availability} onChange={updateField}>
-                  <option value="Available">Available</option>
-                  <option value="Unavailable">Unavailable</option>
-                </SelectField>
                 <Field
                   label="Short description"
                   name="shortDescription"
@@ -314,64 +266,13 @@ export default function AddService() {
               </div>
             </FormSection>
 
-            <FormSection icon={CalendarDays} title="Booking schedule" subtitle="Add the dates and times patients can select for this service.">
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                <label>
-                  <span className="mb-2 block text-sm font-bold text-slate-700">Date</span>
-                  <input
-                    type="date"
-                    value={slotDate}
-                    min={localDateKey(new Date())}
-                    onChange={(event) => { setSlotDate(event.target.value); setSlotError('') }}
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50"
-                  />
-                </label>
-                <label>
-                  <span className="mb-2 block text-sm font-bold text-slate-700">Time</span>
-                  <input
-                    type="time"
-                    value={slotTime}
-                    onChange={(event) => { setSlotTime(event.target.value); setSlotError('') }}
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50"
-                  />
-                </label>
-                <button type="button" onClick={addScheduleSlot} className="mt-auto inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-bold text-white transition hover:bg-emerald-700"><Plus size={17} /> Add slot</button>
-              </div>
-              {slotError && <p role="alert" className="mt-2 text-xs font-semibold text-rose-600">{slotError}</p>}
-
-              <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70">
-                <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-                  <p className="text-sm font-bold text-slate-800">{totalSlots} booking {totalSlots === 1 ? 'slot' : 'slots'}</p>
-                  {totalSlots > 0 && <button type="button" onClick={() => setSchedule({})} className="text-xs font-bold text-rose-600 hover:text-rose-700">Clear schedule</button>}
-                </div>
-                {scheduleEntries.length === 0 ? (
-                  <div className="px-4 py-8 text-center"><Clock3 className="mx-auto text-slate-300" size={24} /><p className="mt-2 text-sm font-semibold text-slate-500">No service slots added</p></div>
-                ) : (
-                  <div className="divide-y divide-slate-200">
-                    {scheduleEntries.map(([date, slots]) => (
-                      <div key={date} className="grid gap-3 px-4 py-4 sm:grid-cols-[10rem_minmax(0,1fr)]">
-                        <div><p className="text-sm font-bold text-slate-800">{formatScheduleDate(date)}</p><p className="mt-0.5 text-xs text-slate-400">{slots.length} {slots.length === 1 ? 'slot' : 'slots'}</p></div>
-                        <div className="flex flex-wrap gap-2">
-                          {slots.map((slot) => (
-                            <span key={slot} className="inline-flex items-center gap-1.5 rounded-full bg-white py-1.5 pl-3 pr-1.5 text-xs font-bold text-slate-700 ring-1 ring-slate-200">
-                              {slot}
-                              <button type="button" onClick={() => removeScheduleSlot(date, slot)} aria-label={`Remove ${slot} on ${date}`} className="grid h-5 w-5 place-items-center rounded-full text-slate-400 hover:bg-rose-50 hover:text-rose-600"><X size={12} /></button>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </FormSection>
           </div>
 
           <aside className="space-y-4 xl:sticky xl:top-28">
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="relative aspect-[4/3] bg-linear-to-br from-emerald-100 to-teal-50">
                 {previewImage ? <PreviewImage key={previewImage} src={previewImage} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-emerald-600"><Stethoscope size={38} /></div>}
-                <span className={`absolute left-3 top-3 rounded-full px-2.5 py-1 text-xs font-bold shadow-sm ${form.availability === 'Available' ? 'bg-white text-emerald-700' : 'bg-slate-800 text-white'}`}>{form.availability}</span>
+                <span className="absolute left-3 top-3 rounded-full bg-white px-2.5 py-1 text-xs font-bold text-emerald-700 shadow-sm">Open 24/7</span>
               </div>
               <div className="p-5">
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">Service preview</p>
@@ -379,14 +280,14 @@ export default function AddService() {
                 <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">{form.shortDescription.trim() || 'Your short service description will appear here.'}</p>
                 <div className="mt-5 flex items-end justify-between gap-3 border-t border-slate-100 pt-4">
                   <div><p className="text-xs text-slate-400">Price</p><p className="mt-0.5 text-lg font-bold text-slate-900">{form.price === '' ? 'Not set' : formatCurrency(form.price)}</p></div>
-                  <div className="text-right"><p className="text-xs text-slate-400">Schedule</p><p className="mt-0.5 text-sm font-bold text-slate-700">{totalSlots} {totalSlots === 1 ? 'slot' : 'slots'}</p></div>
+                  <div className="text-right"><p className="text-xs text-slate-400">Requests</p><p className="mt-0.5 text-sm font-bold text-emerald-700">Open 24/7</p></div>
                 </div>
               </div>
             </section>
 
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-sm font-bold text-slate-900">Ready to create?</h2>
-              <p className="mt-1 text-xs leading-5 text-slate-500">Required fields are marked with an asterisk. Schedule and instructions can be added later.</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">Required fields are marked with an asterisk. Active services accept requests at any time.</p>
               <button type="submit" disabled={saving} className="mt-4 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60">
                 {saving ? <LoaderCircle className="animate-spin" size={18} /> : <Check size={18} />}{saving ? 'Creating service...' : 'Create service'}
               </button>
@@ -431,10 +332,6 @@ function Field({ label, error, hint, className = '', prefix, required, ...props 
       {error && <span id={`${props.name}-error`} className="mt-1.5 block text-xs font-semibold text-rose-600">{error}</span>}
     </label>
   )
-}
-
-function SelectField({ label, children, ...props }) {
-  return <label className="block"><span className="mb-2 block text-sm font-bold text-slate-700">{label}</span><select {...props} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50">{children}</select></label>
 }
 
 function TextArea({ label, hint, className = '', ...props }) {
@@ -488,35 +385,6 @@ function isHttpUrl(value) {
   } catch {
     return false
   }
-}
-
-function toTwelveHourTime(value) {
-  const [rawHour, minute] = value.split(':')
-  const hour = Number(rawHour)
-  const suffix = hour >= 12 ? 'PM' : 'AM'
-  return `${String(hour % 12 || 12).padStart(2, '0')}:${minute} ${suffix}`
-}
-
-function compareTimeSlots(first, second) {
-  return timeSlotMinutes(first) - timeSlotMinutes(second)
-}
-
-function timeSlotMinutes(value) {
-  const [time, suffix] = value.split(' ')
-  const [rawHour, minute] = time.split(':').map(Number)
-  return (rawHour % 12 + (suffix === 'PM' ? 12 : 0)) * 60 + minute
-}
-
-function formatScheduleDate(value) {
-  const date = new Date(`${value}T00:00:00`)
-  return date.toLocaleDateString('en-BD', { weekday: 'short', month: 'short', day: 'numeric' })
-}
-
-function localDateKey(date) {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
 }
 
 function revokePreviewUrl(ref) {

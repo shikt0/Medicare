@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Activity, ArrowRight, BellRing, BriefcaseBusiness, CalendarDays, FlaskConical, UsersRound } from 'lucide-react'
+import { Activity, ArrowRight, BellRing, BriefcaseBusiness, CalendarDays, FlaskConical, ListChecks, UsersRound } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useStaffAuth } from '../auth/staffAuth'
 import { ErrorMessage, LoadingState, PageHeader, Panel, StatCard } from '../components/AdminUi'
@@ -15,7 +15,7 @@ const configs = {
   pathologist: {
     title: 'Pathologist Dashboard', subtitle: 'Prioritized laboratory work assigned to you.',
     stats: [['Open assignments', 'assigned'], ['Urgent tests', 'urgent'], ['Processing', 'processing'], ['Completed', 'completed']],
-    links: [['Laboratory queue', '/pathologist-portal/laboratory', FlaskConical], ['Announcements', '/pathologist-portal/announcements', BellRing], ['My profile', '/pathologist-portal/profile', UsersRound]],
+    links: [['Service requests', '/pathologist-portal/service-requests', ListChecks], ['Laboratory queue', '/pathologist-portal/laboratory', FlaskConical], ['Announcements', '/pathologist-portal/announcements', BellRing], ['My profile', '/pathologist-portal/profile', UsersRound]],
   },
   hr: {
     title: 'HR Dashboard', subtitle: 'Workforce operations, recruitment, and hospital communications.',

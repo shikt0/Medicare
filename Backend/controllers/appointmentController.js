@@ -1,4 +1,6 @@
 import Appointment from "../models/Appointment.js";
+import { evaluateCashPaymentOnCompletion } from "../utils/cashCompletion.js";
+import { isWeeklySlotAvailable, normalizeTimeSlot, timeSlotMinutes, weekdayKeyForDate } from "../utils/weeklySchedule.js";
 import Doctor from "../models/Doctor.js";
 import dotenv from 'dotenv';
 import Stripe from 'stripe';
@@ -19,6 +21,8 @@ const safeNumber = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
+
+const localDateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
 const buildFrontendBase = (req) => {
   if (FRONTEND_URL) return FRONTEND_URL.replace(/\/$/, "");
@@ -160,45 +164,42 @@ export const createAppointment= async (req,res) => {
 
     }
 
-    const numericFee= safeNumber(fee ?? fees ?? 0);
+    const requestedDate = String(date).trim();
+    const requestedTime = normalizeTimeSlot(time);
+    if (!weekdayKeyForDate(requestedDate) || !requestedTime) {
+      return res.status(400).json({ success: false, message: "Choose a valid appointment date and time" });
+    }
+    if (requestedDate < localDateKey()) {
+      return res.status(400).json({ success: false, message: "Appointment date cannot be in the past" });
+    }
+    const now = new Date();
+    if (requestedDate === localDateKey(now) && timeSlotMinutes(requestedTime) <= now.getHours() * 60 + now.getMinutes()) {
+      return res.status(400).json({ success: false, message: "Appointment time must be in the future" });
+    }
+
+    const doctor = await Doctor.findById(doctorId).lean();
+    if(!doctor) return res.status(404).json({ success:false, message: "Doctor not found" });
+    if (String(doctor.availability || "Available").toLowerCase() !== "available") {
+      return res.status(409).json({ success: false, message: "This doctor is not accepting appointments right now" });
+    }
+    if (!isWeeklySlotAvailable(doctor.schedule, requestedDate, requestedTime)) {
+      return res.status(409).json({ success: false, message: "This time is no longer in the doctor's weekly schedule" });
+    }
+
+    const numericFee= safeNumber(doctor.fee ?? fee ?? fees ?? 0);
     if(numericFee=== null || numericFee<0){
-        return res.status(400).json({
-            success:false,
-            message:"Fees must be a valid number"
-        });
+      return res.status(400).json({ success:false, message:"Fees must be a valid number" });
     }
 
-    //duplicate booking prevention
     const existingBooking= await Appointment.findOne({
-        doctorId,
-        createdBy: clerkUserId,
-        date:String(date),
-        time: String(time),
-        status: {$ne: "Canceled"},
+      doctorId,
+      date: requestedDate,
+      time: requestedTime,
+      status: {$ne: "Canceled"},
     }).lean();
-
     if(existingBooking){
-        return res.status(409).json({
-            success:false,
-            message:"You already have an appointment with this doctor or the slected slot"
-        });
-
-        
-
+      return res.status(409).json({ success:false, message:"This appointment time has already been booked" });
     }
-    let doctor= null;
-        try {
-            doctor= await Doctor.findById(doctorId).lean();
-
-
-        } catch (e){
-                console.warn("Doctor lookup failed", e?.message|| e);
-        }
-
-        if(!doctor) return res.status(404).json({
-            success:false,
-            message: "Doctor not found"
-        });
 
 
 
@@ -239,8 +240,8 @@ export const createAppointment= async (req,res) => {
       mobile: String(mobile).trim(),
       age: age ? Number(age) : undefined,
       gender: gender ? String(gender) : "",
-      date: String(date),
-      time: String(time),
+      date: requestedDate,
+      time: requestedTime,
       fees: numericFee,
       status: "Pending",
       payment: { method: paymentMethod === "Cash" ? "Cash" : "Online", status: "Pending", amount: numericFee },
@@ -462,6 +463,21 @@ export const updateAppointment= async (req,res) => {
     if (body.status) update.status = body.status;
     if (body.notes !== undefined) update.notes = body.notes;
 
+    if (body.status === "Completed" && appt.status !== "Completed") {
+      const cashDecision = evaluateCashPaymentOnCompletion(appt, body.cashPaymentReceived);
+      if (!cashDecision.ok) {
+        return res.status(400).json({ success: false, message: cashDecision.message });
+      }
+      if (cashDecision.requiresDecision) {
+        update["payment.status"] = cashDecision.paymentStatus;
+        update["payment.amount"] = cashDecision.amount;
+        update.paidAt = cashDecision.paidAt;
+        update["payment.meta.cashReceived"] = cashDecision.cashPaymentReceived;
+        update["payment.meta.cashConfirmedAt"] = cashDecision.confirmedAt;
+        update["payment.meta.cashConfirmedBy"] = req.actor?.id || "admin";
+      }
+    }
+
     if (body.date !== undefined || body.time !== undefined) {
       if (!body.date || !body.time) {
         return res.status(400).json({ success: false, message: "Both date and time are required to reschedule" });
@@ -540,7 +556,10 @@ export const cancelAppointment = async (req,res) => {
 export const getStats= async (req,res) => {
   try {
     const total = await Appointment.countDocuments();
-    const paidAgg = await Appointment.aggregate([{ $match: { "payment.status": "Paid" } }, { $group: { _id: null, total: { $sum: "$fees" } } }]);
+    const paidAgg = await Appointment.aggregate([
+      { $match: { status: "Completed", "payment.status": "Paid" } },
+      { $group: { _id: null, total: { $sum: "$fees" } } },
+    ]);
     const revenue = (paidAgg[0] && paidAgg[0].total) || 0;
 
     const groupedStatuses = await Appointment.aggregate([

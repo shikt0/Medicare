@@ -59,26 +59,44 @@ const serviceAppointmentSchema = new mongoose.Schema({
         min: 0,
     },
 
+  requestedAt: {
+    type: Date,
+    default: Date.now,
+    index: true,
+  },
+
+  assignedPathologist: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Staff",
+    default: null,
+    index: true,
+  },
+
+  assignedPathologistName: { type: String, trim: true, default: "" },
+  assignedPathologistEmployeeId: { type: String, trim: true, default: "" },
+  assignedAt: { type: Date, default: null },
+  assignmentSequence: { type: Number, default: null },
+
+  // Optional legacy fields keep historical scheduled bookings readable.
   date: {
     type: String,
-      required: true,
-        index: true,
+      default: "",
     },
 
   hour: {
     type: Number,
-      required: true,
+      default: null,
     },
 
   minute: {
     type: Number,
-      required: true,
+      default: null,
     },
 
   ampm: {
     type: String,
-      enum: ["AM", "PM"],
-      required: true,
+      enum: ["AM", "PM", ""],
+      default: "",
     },
 
   status: {
@@ -139,8 +157,8 @@ const serviceAppointmentSchema = new mongoose.Schema({
     timestamps:true
 });
 
-serviceAppointmentSchema.index({date:1,status:1});
 serviceAppointmentSchema.index({serviceId:1});
+serviceAppointmentSchema.index({assignedPathologist:1,status:1,requestedAt:-1});
 
 const ServiceAppointment= mongoose.models.ServiceAppointment || 
 mongoose.model("ServiceAppointment", serviceAppointmentSchema);

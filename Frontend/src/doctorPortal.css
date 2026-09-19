@@ -248,6 +248,11 @@
 .doctor-published-schedule article header span { color: #0b816a; font-size: .5rem; font-weight: 810; text-transform: uppercase; letter-spacing: .08em; }
 .doctor-published-schedule article header strong { margin-top: .18rem; font-size: .65rem; }
 .doctor-published-schedule article header small { color: #83948f; font-size: .51rem; }
+.doctor-published-schedule article.is-empty { background: #fbfcfc; }
+.doctor-day-actions { display: flex; align-items: center; gap: .6rem; }
+.doctor-day-actions button { border: 0; color: #a4424b; background: transparent; font-size: .49rem; font-weight: 780; }
+.doctor-day-actions button:hover { text-decoration: underline; }
+.doctor-day-off { margin: .55rem 0 0; color: #a2afac; font-size: .52rem; }
 .doctor-published-schedule article > div { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .65rem; }
 .doctor-published-schedule article > div > span { display: flex; min-height: 2.1rem; align-items: center; gap: .3rem; padding: 0 .35rem 0 .55rem; border: 1px solid #cfe3dc; border-radius: .65rem; color: #286057; background: #f1faf7; font-size: .53rem; font-weight: 720; }
 .doctor-published-schedule article > div button { display: grid; width: 1.45rem; height: 1.45rem; place-items: center; border: 0; border-radius: .45rem; color: #77908a; background: white; }
@@ -282,6 +287,17 @@
 .doctor-profile-preview > div:nth-of-type(2) strong { display: block; margin-top: .18rem; color: #365a53; font-size: .58rem; }
 .doctor-profile-preview > a { display: inline-flex; align-items: center; gap: .35rem; color: #08735f; font-size: .56rem; font-weight: 780; }
 .doctor-profile-form { overflow: hidden; }
+.doctor-profile-photo { display: flex; align-items: center; gap: .85rem; margin: 1rem 1rem 0; padding: .85rem; border: 1px solid #dce9e5; border-radius: .85rem; background: #f8fbfa; }
+.doctor-profile-photo > img, .doctor-profile-photo > .patient-image-fallback { width: 4.5rem; height: 4.5rem; flex: 0 0 4.5rem; border-radius: 1rem; object-fit: cover; background: #dcefe9; }
+.doctor-profile-photo > div { min-width: 0; }
+.doctor-profile-photo strong { display: block; color: #254c45; font-size: .66rem; }
+.doctor-profile-photo p { margin: .2rem 0 .55rem; color: #7d908b; font-size: .51rem; }
+.doctor-profile-photo span { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.doctor-profile-photo label, .doctor-profile-photo button { display: inline-flex; min-height: 2rem; align-items: center; justify-content: center; gap: .35rem; padding: 0 .7rem; border-radius: .58rem; font-size: .52rem; font-weight: 780; cursor: pointer; }
+.doctor-profile-photo label { color: white; background: #08735f; }
+.doctor-profile-photo label input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.doctor-profile-photo button { border: 1px solid #cfdeda; color: #5f746f; background: white; }
+.doctor-profile-photo small { display: block; max-width: 24rem; margin-top: .45rem; overflow: hidden; color: #66807a; font-size: .49rem; text-overflow: ellipsis; white-space: nowrap; }
 .doctor-profile-form__grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .75rem; padding: 1rem; }
 .doctor-profile-form > .doctor-form-field { padding: 0 1rem; }
 .doctor-profile-form > .doctor-inline-error { margin: .8rem 1rem 0; }
