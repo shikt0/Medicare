@@ -31,7 +31,7 @@ qualifications: { type: String, default: "" },
 location: { type: String, default: "" },
 about: { type: String, default: "" },
 
-fee: { type: Number, default: 0 },
+fee: { type: Number, min: 0, default: 0 },
 availability: {
   type: String,
       enum: ["Available", "Unavailable"],

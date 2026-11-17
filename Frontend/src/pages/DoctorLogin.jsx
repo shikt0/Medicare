@@ -25,6 +25,7 @@ export default function DoctorLogin() {
 
   async function submit(event) {
     event.preventDefault()
+    if (submitting) return
     if (!form.email.trim() || !form.password) {
       setError('Enter your doctor email and password.')
       return
@@ -33,10 +34,9 @@ export default function DoctorLogin() {
     setError('')
     try {
       const payload = await patientApi.doctorLogin({ email: form.email.trim(), password: form.password })
+      if (!payload.token || !payload.data) throw new Error('The server could not start your session. Please try again.')
       saveDoctorSession({ token: payload.token, doctor: payload.data })
-      const destination = import.meta.env.VITE_DOCTOR_ADMIN_URL
-      if (destination) window.location.assign(destination)
-      else navigate('/doctor-portal', { replace: true })
+      navigate('/doctor-portal', { replace: true })
     } catch (loginError) {
       setError(loginError.status === 401 ? 'The email or password is incorrect.' : loginError.message || 'Unable to sign in.')
     } finally {

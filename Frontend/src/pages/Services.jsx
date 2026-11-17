@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowRight, CalendarDays, Check, Microscope, Search, SlidersHorizontal, WalletCards, X } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import Footer from '../components/Footer'
 import Navbar from '../components/Navbar'
 import { EmptyState, ErrorState, ImageWithFallback, LoadingGrid, PageIntro } from '../components/PatientUi'
@@ -8,10 +8,19 @@ import { patientApi } from '../lib/api'
 import { formatCurrency, getId } from '../lib/format'
 
 export default function Services() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [services, setServices] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [query, setQuery] = useState('')
+  const query = searchParams.get('q') || ''
+  function setQuery(value) {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (value) next.set('q', value)
+      else next.delete('q')
+      return next
+    }, { replace: true })
+  }
   const [sort, setSort] = useState('recommended')
 
   const loadServices = useCallback(async () => {

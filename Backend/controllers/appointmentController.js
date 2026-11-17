@@ -1,3 +1,7 @@
+import { createPaymentConfirmationHandler } from "../utils/confirmCheckoutPayment.js";
+import { getPaymentCurrency, paymentCurrencyExpression } from "../utils/paymentCurrency.js";
+import { handleAppointmentSlotError, requireAppointmentSlotIndex } from "../utils/appointmentSlots.js";
+import { escapeRegExp, isObjectId } from "../utils/validation.js";
 import Appointment from "../models/Appointment.js";
 import { evaluateCashPaymentOnCompletion } from "../utils/cashCompletion.js";
 import { isWeeklySlotAvailable, normalizeTimeSlot, timeSlotMinutes, weekdayKeyForDate } from "../utils/weeklySchedule.js";
@@ -12,7 +16,7 @@ dotenv.config();
 const STRIPE_KEY=process.env.STRIPE_SECRET_KEY;
 const FRONTEND_URL=process.env.FRONTEND_URL;
 const MAJOR_ADMIN_ID=process.env.MAJOR_ADMIN_ID || null;
-const stripe =STRIPE_KEY? new Stripe(STRIPE_KEY,{apiVersion:"2026-08-05"}):null;
+const stripe =STRIPE_KEY ? new Stripe(STRIPE_KEY) : null;
 
 
 //helpers
@@ -66,7 +70,7 @@ export const getAppointment= async (req,res) => {
     if (patientClerkId) filter.createdBy = patientClerkId;
     if (createdBy) filter.createdBy = createdBy;
     if (search) {
-      const re = new RegExp(search, "i");
+      const re = new RegExp(escapeRegExp(search), "i");
       filter.$or = [{ patientName: re }, { mobile: re }, { doctorName: re }, { speciality: re }, { notes: re }];
     }
 
@@ -155,15 +159,23 @@ export const createAppointment= async (req,res) => {
         message:"Authentication required"
     });
 
-    if(!doctorId || !patientName || !mobile || !date || !time){
+    if(!doctorId || !String(patientName || '').trim() || !String(mobile || '').trim() || !date || !time){
         return res.status(400).json({
             success:false,
-            message:"All fields are req"
+            message:"Doctor, patient name, mobile, date, and time are required"
         });
 
 
     }
 
+    if (!isObjectId(doctorId)) return res.status(400).json({ success: false, message: "Invalid doctor ID" });
+    if (age !== '' && age != null && (!Number.isFinite(Number(age)) || Number(age) < 0 || Number(age) > 150)) {
+      return res.status(400).json({ success: false, message: "Age must be between 0 and 150" });
+    }
+    if (String(notes).length > 1000) return res.status(400).json({ success: false, message: "Notes cannot exceed 1000 characters" });
+    if (paymentMethod !== undefined && !['Cash', 'Online'].includes(paymentMethod)) {
+      return res.status(400).json({ success: false, message: "Choose Cash or Online payment" });
+    }
     const requestedDate = String(date).trim();
     const requestedTime = normalizeTimeSlot(time);
     if (!weekdayKeyForDate(requestedDate) || !requestedTime) {
@@ -191,6 +203,7 @@ export const createAppointment= async (req,res) => {
       return res.status(400).json({ success:false, message:"Fees must be a valid number" });
     }
 
+    await requireAppointmentSlotIndex(Appointment.collection);
     const existingBooking= await Appointment.findOne({
       doctorId,
       date: requestedDate,
@@ -205,7 +218,7 @@ export const createAppointment= async (req,res) => {
 
 
     // Resolve owner, names, images, etc.
-    let resolvedOwner = ownerFromBody || doctor.owner || null;
+    let resolvedOwner = doctor.owner || null;
     if (!resolvedOwner) resolvedOwner = MAJOR_ADMIN_ID || String(doctorId);
 
     const doctorName = (doctor.name && String(doctor.name).trim()) || (doctorNameFromBody && String(doctorNameFromBody).trim()) || "";
@@ -231,6 +244,7 @@ export const createAppointment= async (req,res) => {
 
     const doctorImage = { url: doctorImageUrl, publicId: doctorImagePublicId };
 
+    const currency = getPaymentCurrency();
     const base = {
       doctorId: String(doctor._id || doctorId),
       doctorName,
@@ -238,13 +252,13 @@ export const createAppointment= async (req,res) => {
       doctorImage,
       patientName: String(patientName).trim(),
       mobile: String(mobile).trim(),
-      age: age ? Number(age) : undefined,
+      age: age !== '' && age != null ? Number(age) : undefined,
       gender: gender ? String(gender) : "",
       date: requestedDate,
       time: requestedTime,
       fees: numericFee,
       status: "Pending",
-      payment: { method: paymentMethod === "Cash" ? "Cash" : "Online", status: "Pending", amount: numericFee },
+      payment: { method: paymentMethod === "Cash" ? "Cash" : "Online", status: "Pending", amount: numericFee, currency },
       notes: notes || "",
       createdBy: clerkUserId,
       owner: resolvedOwner,
@@ -256,7 +270,7 @@ export const createAppointment= async (req,res) => {
       const created = await Appointment.create({
         ...base,
         status: "Confirmed",
-        payment: { method: base.payment.method, status: "Paid", amount: 0 },
+        payment: { ...base.payment, status: "Paid", amount: 0 },
         paidAt: new Date(),
       });
       return res.status(201).json({ success: true, appointment: created, checkoutUrl: null });
@@ -267,7 +281,7 @@ export const createAppointment= async (req,res) => {
       const created = await Appointment.create({
         ...base,
         status: "Pending",
-        payment: { method: "Cash", status: "Pending", amount: numericFee },
+        payment: { ...base.payment, method: "Cash", status: "Pending", amount: numericFee },
       });
       return res.status(201).json({ success: true, appointment: created, checkoutUrl: null });
     }
@@ -292,7 +306,7 @@ export const createAppointment= async (req,res) => {
         line_items: [
           {
             price_data: {
-              currency: "inr",
+              currency,
               product_data: { name: `Appointment - ${String(patientName).slice(0, 40)}` },
               unit_amount: Math.round(numericFee * 100),
             },
@@ -325,10 +339,13 @@ export const createAppointment= async (req,res) => {
       });
       return res.status(201).json({ success: true, appointment: created, checkoutUrl: session.url || null });
     } catch (dbErr) {
+      try { await stripe.checkout.sessions.expire(session.id); } catch { console.warn('Unable to expire checkout after appointment creation failed'); }
+      if (handleAppointmentSlotError(dbErr, res)) return;
       console.error("DB error saving appointment after stripe session:", dbErr);
       return res.status(500).json({ success: false, message: "Failed to create appointment record" });
     }
   } catch (err) {
+    if (handleAppointmentSlotError(err, res)) return;
     console.error("createAppointment unexpected:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
@@ -336,117 +353,19 @@ export const createAppointment= async (req,res) => {
 
 
 //confirm payment online
-export const confirmPayment= async (req,res) => {
-  try {
-    const {session_id}= req.query;
-
-    if(!session_id) return res.status(400).json({
-      success:false,
-      message:"Session id required"
-    });
-
-    if(!stripe) return res.status(500).json({
-      success:false,
-      message:"Stripe is not setup"
-    });
-
-    let session;
-    try{
-      session= await stripe.checkout.sessions.retrieve(session_id);
-    } catch (stripeErr) {
-      console.error("Stripe retrieve session error:", stripeErr);
-      return res.status(404).json({
-        success:false,
-        message:"Stripe session not found"
-      });
-    }
-
-      if(!session) return res.status(404).json({
-        success:false,
-        message:"invalid session"
-      });
-      if(session.payment_status !== "paid"){
-        return res.status(400).json({
-          success:false,
-          message:"Payment not completed"
-        });
-      }
-
-      
-     // Try match by sessionId first
-    let appt = await Appointment.findOneAndUpdate(
-      { sessionId: session_id },
-      {
-        "payment.status": "Paid",
-        "payment.providerId": session.payment_intent || session.payment_intent_id || null,
-        status: "Confirmed",
-        paidAt: new Date(),
-      },
-      { new: true }
-    );
-
-    // fallback: try match via metadata (doctorId + mobile + patientName)
-    if (!appt) {
-      const meta = session.metadata || {};
-      if (meta.doctorId && meta.mobile && meta.patientName) {
-        appt = await Appointment.findOneAndUpdate(
-          {
-            doctorId: meta.doctorId,
-            mobile: meta.mobile,
-            patientName: meta.patientName,
-            fees: Math.round((session.amount_total || 0) / 100) || undefined,
-          },
-          {
-            "payment.status": "Paid",
-            "payment.providerId": session.payment_intent || null,
-            status: "Confirmed",
-            paidAt: new Date(),
-            sessionId: session_id,
-          },
-          { new: true }
-        );
-      }
-    }
-
-    // last attempt: find appointment created in last 15 minutes with matching amount
-    if (!appt) {
-      const amount = Math.round((session.amount_total || 0) / 100);
-      const fifteenAgo = new Date(Date.now() - 1000 * 60 * 15);
-      appt = await Appointment.findOneAndUpdate(
-        { fees: amount, createdAt: { $gte: fifteenAgo } },
-        {
-          "payment.status": "Paid",
-          "payment.providerId": session.payment_intent || null,
-          status: "Confirmed",
-          paidAt: new Date(),
-          sessionId: session_id,
-        },
-        { new: true }
-      );
-    }
-
-    if (!appt) {
-      return res.status(404).json({ success: false, message: "Appointment not found for this payment session" });
-    }
-
-    return res.json({
-      success:true,
-      appointment: appt
-    });
-
-
-  } catch (err) {
-    console.error("ConfirmPayment Error:", err);
-    return res.status(500).json({ success: false, message: "Server error" });
-  }
-  
-}
+export const confirmPayment = createPaymentConfirmationHandler({
+  model: Appointment,
+  getStripe: () => stripe,
+  sessionPath: 'sessionId',
+  paidAtPath: 'paidAt',
+});
 
 //update appointment
 
 export const updateAppointment= async (req,res) => {
   try {
     const {id}= req.params;
+    if (!isObjectId(id)) return res.status(400).json({ success: false, message: "Invalid appointment ID" });
     const body =req.body || {};
     const appt= await Appointment.findById(id);
 
@@ -460,6 +379,12 @@ export const updateAppointment= async (req,res) => {
     }
 
     const update = {};
+    if (body.status !== undefined && !["Pending", "Confirmed", "Completed", "Canceled", "Rescheduled"].includes(body.status)) {
+      return res.status(400).json({ success: false, message: "Invalid appointment status" });
+    }
+    if (body.notes !== undefined && String(body.notes).length > 1000) {
+      return res.status(400).json({ success: false, message: "Notes cannot exceed 1000 characters" });
+    }
     if (body.status) update.status = body.status;
     if (body.notes !== undefined) update.notes = body.notes;
 
@@ -485,16 +410,26 @@ export const updateAppointment= async (req,res) => {
       if (appt.status === "Completed" || appt.status === "Canceled") {
         return res.status(400).json({ success: false, message: "Cannot reschedule completed/canceled appointment" });
       }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(body.date))) {
-        return res.status(400).json({ success: false, message: "Date must be in YYYY-MM-DD format" });
+      const date = String(body.date).trim();
+      const time = normalizeTimeSlot(body.time);
+      if (!weekdayKeyForDate(date) || !time) {
+        return res.status(400).json({ success: false, message: "Choose a valid appointment date and time" });
       }
-      if (!/^(0?[1-9]|1[0-2]):[0-5]\d\s(AM|PM)$/i.test(String(body.time))) {
-        return res.status(400).json({ success: false, message: "Time must be in hh:mm AM/PM format" });
+      const now = new Date();
+      if (date < localDateKey(now) || (date === localDateKey(now) && timeSlotMinutes(time) <= now.getHours() * 60 + now.getMinutes())) {
+        return res.status(400).json({ success: false, message: "Appointment time must be in the future" });
       }
-      update.date = body.date;
-      update.time = body.time;
+      const doctor = await Doctor.findById(appt.doctorId).lean();
+      if (!doctor || String(doctor.availability || 'Available').toLowerCase() !== 'available' || !isWeeklySlotAvailable(doctor.schedule, date, time)) {
+        return res.status(409).json({ success: false, message: "This time is not available in the doctor's schedule" });
+      }
+      await requireAppointmentSlotIndex(Appointment.collection);
+      const conflict = await Appointment.findOne({ _id: { $ne: id }, doctorId: appt.doctorId, date, time, status: { $ne: "Canceled" } }).lean();
+      if (conflict) return res.status(409).json({ success: false, message: "This appointment time has already been booked" });
+      update.date = date;
+      update.time = time;
       update.status = "Rescheduled";
-      update.rescheduledTo = { date: body.date, time: body.time };
+      update.rescheduledTo = { date, time };
     }
 
 
@@ -507,6 +442,7 @@ export const updateAppointment= async (req,res) => {
       appointment:updated
     });
   } catch (err) {
+    if (handleAppointmentSlotError(err, res)) return;
     console.error("update appointment Error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
@@ -517,6 +453,7 @@ export const updateAppointment= async (req,res) => {
 export const cancelAppointment = async (req,res) => {
   try {
     const {id}= req.params;
+    if (!isObjectId(id)) return res.status(400).json({ success: false, message: "Invalid appointment ID" });
     const appt= await Appointment.findById(id);
 
     if(!appt) return res.status(404).json({
@@ -558,9 +495,11 @@ export const getStats= async (req,res) => {
     const total = await Appointment.countDocuments();
     const paidAgg = await Appointment.aggregate([
       { $match: { status: "Completed", "payment.status": "Paid" } },
-      { $group: { _id: null, total: { $sum: "$fees" } } },
+      { $group: { _id: paymentCurrencyExpression(), total: { $sum: "$fees" } } },
     ]);
-    const revenue = (paidAgg[0] && paidAgg[0].total) || 0;
+    const revenueByCurrency = { bdt: 0, inr: 0 };
+    paidAgg.forEach((row) => { revenueByCurrency[row._id] = Number(row.total || 0); });
+    const revenue = Object.values(revenueByCurrency).reduce((total, amount) => total + amount, 0);
 
     const groupedStatuses = await Appointment.aggregate([
       { $group: { _id: "$status", count: { $sum: 1 } } },
@@ -584,7 +523,7 @@ export const getStats= async (req,res) => {
 
     return res.json({
       success:true,
-      stats:{total,revenue,recentLast7Days:recent,statusCounts}
+      stats:{total,revenue,revenueByCurrency,currency:getPaymentCurrency(),recentLast7Days:recent,statusCounts}
     });
 
   } catch (err) {
@@ -619,7 +558,7 @@ export const getAppointmentByDoctor =async (req,res) => {
     if (mobile) filter.mobile = mobile;
     if (status) filter.status = status;
     if (search) {
-      const re = new RegExp(search, "i");
+      const re = new RegExp(escapeRegExp(search), "i");
       filter.$or = [{ patientName: re }, { mobile: re }, { notes: re }];
     }
 

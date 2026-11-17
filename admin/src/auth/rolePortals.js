@@ -8,6 +8,7 @@ export const ROLE_PORTAL_HOME = Object.freeze({
 })
 
 export const ROLE_LOGIN_PATH = Object.freeze({
+  admin: '/admin/login',
   nurse: '/nurse/login',
   pathologist: '/pathologist/login',
   hr: '/hr/login',

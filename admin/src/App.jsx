@@ -1,35 +1,40 @@
-import React, { useEffect } from 'react'
-import { Route, Routes, useLocation } from 'react-router-dom'
-import AddDoctor from './pages/AddDoctor'
-import DoctorsList from './pages/DoctorsList'
-import Appointments from './pages/Appointments'
-import ServiceDashboard from './pages/ServiceDashboard'
-import AddService from './pages/AddService'
-import ServicesList from './pages/ServicesList'
-import ServiceAppointments from './pages/ServiceAppointments'
+import React, { lazy, Suspense, useEffect } from 'react'
+import { Link, Route, Routes, useLocation } from 'react-router-dom'
 import { StaffAuthProvider } from './auth/StaffAuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import AdminLayout from './components/AdminLayout'
-import WorkforceAuth from './pages/WorkforceAuth'
-import Unauthorized from './pages/Unauthorized'
-import StaffManagement from './pages/StaffManagement'
-import PortalHome from './pages/PortalHome'
-import MySchedule from './pages/MySchedule'
-import MyAnnouncements from './pages/MyAnnouncements'
-import MyProfile from './pages/MyProfile'
-import DutyManagement from './pages/DutyManagement'
-import Laboratory from './pages/Laboratory'
-import Recruitment from './pages/Recruitment'
-import AnnouncementManagement from './pages/AnnouncementManagement'
-import FreelancerAssignments from './pages/FreelancerAssignments'
-import StaffLoginLanding from './pages/StaffLoginLanding'
 import { useStaffAuth } from './auth/staffAuth'
+import { LoadingState } from './components/AdminUi'
+
+const AddDoctor = lazy(() => import('./pages/AddDoctor'))
+const DoctorsList = lazy(() => import('./pages/DoctorsList'))
+const Appointments = lazy(() => import('./pages/Appointments'))
+const ServiceDashboard = lazy(() => import('./pages/ServiceDashboard'))
+const AddService = lazy(() => import('./pages/AddService'))
+const ServicesList = lazy(() => import('./pages/ServicesList'))
+const ServiceAppointments = lazy(() => import('./pages/ServiceAppointments'))
+const WorkforceAuth = lazy(() => import('./pages/WorkforceAuth'))
+const AdminAuth = lazy(() => import('./pages/AdminAuth'))
+const Unauthorized = lazy(() => import('./pages/Unauthorized'))
+const StaffManagement = lazy(() => import('./pages/StaffManagement'))
+const PortalHome = lazy(() => import('./pages/PortalHome'))
+const MySchedule = lazy(() => import('./pages/MySchedule'))
+const MyAnnouncements = lazy(() => import('./pages/MyAnnouncements'))
+const MyProfile = lazy(() => import('./pages/MyProfile'))
+const DutyManagement = lazy(() => import('./pages/DutyManagement'))
+const Laboratory = lazy(() => import('./pages/Laboratory'))
+const Recruitment = lazy(() => import('./pages/Recruitment'))
+const AnnouncementManagement = lazy(() => import('./pages/AnnouncementManagement'))
+const FreelancerAssignments = lazy(() => import('./pages/FreelancerAssignments'))
+const StaffLoginLanding = lazy(() => import('./pages/StaffLoginLanding'))
 
 const App = () => {
   return (
     <StaffAuthProvider>
       <PortalDocumentTitle />
+      <Suspense fallback={<LoadingState label="Opening your workspace..." />}>
       <Routes>
+        <Route path="/admin/login/*" element={<AdminAuth />} />
         <Route path="/login" element={<StaffLoginLanding />} />
         <Route path="/nurse/login/*" element={<WorkforceAuth expectedRole="nurse" />} />
         <Route path="/pathologist/login/*" element={<WorkforceAuth expectedRole="pathologist" />} />
@@ -100,6 +105,7 @@ const App = () => {
         </Route>
         <Route path="*" element={<PortalPage title="Page Not Found" />} />
       </Routes>
+      </Suspense>
     </StaffAuthProvider>
   );
 };
@@ -123,6 +129,7 @@ function PortalDocumentTitle() {
 
   useEffect(() => {
     if (pathRole) document.title = roleTitles[pathRole]
+    else if (location.pathname.startsWith('/admin/login')) document.title = 'MediCare Administrator Sign In'
     else if (location.pathname === '/login') document.title = 'MediCare Login Portals'
     else if (location.pathname === '/unauthorized') document.title = 'MediCare Access Restricted'
     else if (localAdminBypass || actor?.role === 'admin') document.title = roleTitles.admin
@@ -141,6 +148,7 @@ function PortalPage({ title }) {
             <p className="page-eyebrow">MediCare portal</p>
             <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{title}</h1>
             <p className="mt-2 text-sm">The page you requested could not be found.</p>
+            <Link to="/login" className="mt-5 inline-flex rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-emerald-800">Choose your portal</Link>
           </div>
         </header>
       </div>

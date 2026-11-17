@@ -6,8 +6,13 @@ administrator-provided email/password credentials and a backend-issued JWT.
 
 ## Local setup
 
-The Vite configuration reads local environment variables from `../Frontend`.
+The admin Vite configuration shares environment files with the patient app:
+it reads `Frontend/.env` and `Frontend/.env.local`, not `admin/.env`.
 Set `VITE_API_URL` when the backend is not running at `http://localhost:4000`.
+Set `VITE_CURRENCY` to the same value as backend `PAYMENT_CURRENCY` (`BDT` by
+default). Changing the display currency does not convert stored prices. Booking
+history keeps its recorded currency; older online bookings without a currency
+are treated as INR. Revenue summaries show each currency separately.
 
 Run the applications:
 
@@ -22,13 +27,17 @@ npm run dev
 npm run dev:staff
 ```
 
-Open `http://localhost:5174` for the local no-login administrator workspace and
-open **Staff management** from the sidebar.
+Open `http://localhost:5174/admin/login` for administrator sign in. Set
+`VITE_CLERK_PUBLISHABLE_KEY` in `Frontend/.env.local` and configure the
+matching Clerk credentials on the backend. An administrator's Clerk account
+must have server-managed public metadata `{ "role": "admin" }`; signing in
+alone never grants administrative access. The API verifies this role.
 
-During local Vite development on exactly `http://localhost:5174`, the admin
-workspace uses a localhost-only development bypass and opens without Clerk
-sign-in. The backend rejects this bypass for the patient port, non-local
-origins, and whenever `NODE_ENV=production`.
+For isolated local development only, an optional no-login workspace requires
+both `VITE_ENABLE_LOCAL_ADMIN=true` in `Frontend/.env.local` and
+`ENABLE_LOCAL_ADMIN=true` in `Backend/.env`. It is disabled by default, accepts
+only loopback requests from port 5174, and is rejected in production. Restart
+both servers after changing these flags.
 
 Authenticated workforce portals run from the same maintained codebase on a
 separate local origin so the no-login Admin bypass cannot intercept staff
@@ -40,7 +49,11 @@ sessions:
 - `http://localhost:5175/freelancer/login`
 
 Each route has its own email/password form. Signing out returns to the portal
-directory. There is intentionally no administrator option in that directory.
+directory, which also links to the separate administrator sign-in page.
+Staff routes work on either admin port and do not require Clerk configuration.
+Set `VITE_WORKFORCE_URL` only when hosting staff on a separate origin. For
+production deployments, set `VITE_PATIENT_URL` to the patient website origin
+so patient and doctor portal links resolve to that application.
 
 After authentication, each role remains inside its own route space instead of
 the administrator root:

@@ -5,7 +5,7 @@ import { ROLE_LOGIN_PATH } from '../auth/rolePortals'
 
 export default function ProtectedRoute({ allowedRoles }) {
   const location = useLocation()
-  const { actor, error, isSignedIn, loading, refreshActor } = useStaffAuth()
+  const { actor, error, isSignedIn, loading, refreshActor, logout } = useStaffAuth()
 
   if (loading) {
     return (
@@ -28,6 +28,7 @@ export default function ProtectedRoute({ allowedRoles }) {
         <section className="w-full max-w-md rounded-2xl border border-rose-200 bg-white p-6 text-center shadow-xl">
           <p className="text-sm font-bold text-rose-700">{error}</p>
           <button type="button" onClick={refreshActor} className="mt-4 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white">Try again</button>
+          <button type="button" onClick={logout} className="ml-3 mt-4 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600">Sign out</button>
         </section>
       </main>
     )

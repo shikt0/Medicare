@@ -1,0 +1,26 @@
+[data-dialog-root] {
+  position: fixed;
+  inset: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  outline: none;
+}
+[data-dialog-panel] {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: .65rem;
+}
+[data-dialog-panel][data-dialog-drawer] {
+  max-height: 100dvh;
+  border-radius: 0;
+}
+[data-dialog-panel] input, [data-dialog-panel] select, [data-dialog-panel] textarea { min-width: 0; }
+[data-dialog-panel] :focus-visible { outline: 2px solid #247660; outline-offset: 2px; }
+[data-dialog-panel] header { gap: .75rem; }
+[data-dialog-panel] header > button { flex-shrink: 0; }
+[data-dialog-panel] footer { flex-wrap: wrap; }

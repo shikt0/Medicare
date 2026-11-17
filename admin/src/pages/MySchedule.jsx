@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { CalendarDays, Clock3, MapPin, UserRound } from 'lucide-react'
 import { EmptyState, ErrorMessage, LoadingState, PageHeader, Panel, StatusBadge } from '../components/AdminUi'
 import { api } from '../lib/api'
+import { localDateKey } from '../lib/format'
 
 export default function MySchedule() {
   const [items, setItems] = useState([])
@@ -16,7 +17,7 @@ export default function MySchedule() {
     return () => { current = false }
   }, [])
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = localDateKey()
   const visible = useMemo(() => items.filter((item) => (tab === 'today' ? item.date === today : tab === 'previous' ? item.date < today : item.date >= today) && (!dateFilter || item.date === dateFilter)), [dateFilter, items, tab, today])
 
   return (

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { APPOINTMENT_SLOT_INDEX_KEYS, APPOINTMENT_SLOT_INDEX_OPTIONS } from '../utils/appointmentSlots.js';
 
 
 const appointmentSchema = new mongoose.Schema({
@@ -44,6 +45,8 @@ const appointmentSchema = new mongoose.Schema({
     },
 
     payment: {
+      // New bookings persist currency; missing historical online currency is interpreted as INR.
+      currency: { type: String, enum: ["bdt", "inr"] },
       method: {
         type: String,
         enum: ["Cash", "Online"],
@@ -62,8 +65,12 @@ const appointmentSchema = new mongoose.Schema({
     paidAt: { type: Date, default: null },
 },
 {
-    timestamps:true
+    timestamps:true,
+    // Install indexes explicitly after auditing existing slots; never mutate production indexes on import.
+    autoIndex:false
 });
+
+appointmentSchema.index(APPOINTMENT_SLOT_INDEX_KEYS, APPOINTMENT_SLOT_INDEX_OPTIONS);
 
 const Appointment = mongoose.models.Appointment || mongoose.model("Appointment", appointmentSchema);
 export default Appointment;

@@ -1,9 +1,11 @@
 import { ArrowLeft, RefreshCw, ShieldX } from 'lucide-react'
 import { useStaffAuth } from '../auth/staffAuth'
+import { Link } from 'react-router-dom'
+import { ROLE_PORTAL_HOME } from '../auth/rolePortals'
 
 export default function Unauthorized() {
   const { actor, logout, refreshActor, loading } = useStaffAuth()
-  const patientUrl = import.meta.env.VITE_PATIENT_URL || 'http://localhost:5173'
+  const portalHome = actor?.role === 'admin' ? '/' : ROLE_PORTAL_HOME[actor?.role]
 
   return (
     <main className="grid min-h-screen place-items-center bg-slate-50 px-4 py-10">
@@ -22,7 +24,7 @@ export default function Unauthorized() {
           <button type="button" onClick={refreshActor} disabled={loading} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-bold text-white disabled:opacity-60"><RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Recheck access</button>
           <button type="button" onClick={logout} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700"><ArrowLeft size={16} /> Use another account</button>
         </div>
-        <a href={patientUrl} className="mt-6 inline-block text-xs font-bold text-slate-400 hover:text-emerald-700">Return to patient website</a>
+        <Link to={portalHome || '/login'} className="mt-6 inline-block text-sm font-bold text-emerald-700 hover:text-emerald-900">{portalHome ? 'Return to my workspace' : 'All login portals'}</Link>
       </section>
     </main>
   )

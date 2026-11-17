@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
-import { formatCurrency, getId } from '../lib/format'
+import { DEFAULT_CURRENCY, formatCurrency, formatRevenue, getId, mergeRevenueBreakdowns, revenueAmount } from '../lib/format'
 
 const initialSummary = {
   totalAppointments: 0,
@@ -88,7 +88,7 @@ export default function ServiceDashboard() {
     })
 
     return [...filtered].sort((first, second) => {
-      if (sort === 'revenue') return number(second.earning) - number(first.earning)
+      if (sort === 'revenue') return revenueAmount(second.earningsByCurrency) - revenueAmount(first.earningsByCurrency)
       if (sort === 'completion') return completionRate(second) - completionRate(first)
       if (sort === 'price') return number(second.price) - number(first.price)
       if (sort === 'name') return serviceName(first).localeCompare(serviceName(second))
@@ -149,7 +149,7 @@ export default function ServiceDashboard() {
           <SummaryCard icon={Stethoscope} label="Services" value={services.length} detail="All open 24/7" tone="sky" />
           <SummaryCard icon={CalendarDays} label="Service requests" value={summary.totalAppointments} detail={`${summary.pending} currently pending`} tone="violet" />
           <SummaryCard icon={CheckCircle2} label="Completed" value={summary.completed} detail={`${summary.completionRate}% completion rate`} tone="emerald" />
-          <SummaryCard icon={WalletCards} label="Service revenue" value={formatCurrency(summary.earning)} detail="Completed requests marked paid" tone="amber" />
+          <SummaryCard icon={WalletCards} label="Service revenue" value={formatRevenue(summary.earning, summary.earningsByCurrency)} detail="Completed paid requests, by currency" tone="amber" />
         </section>
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,.75fr)]">
@@ -179,7 +179,7 @@ export default function ServiceDashboard() {
                 <div className="mt-6 flex items-end justify-between gap-4 border-t border-white/15 pt-5">
                   <div>
                     <p className="text-xs text-emerald-100">Paid service revenue</p>
-                    <p className="mt-1 text-xl font-bold">{formatCurrency(topService.earning)}</p>
+                    <p className="mt-1 text-xl font-bold">{formatRevenue(topService.earning, topService.earningsByCurrency)}</p>
                   </div>
                   <p className="rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold">{formatCurrency(topService.price)}</p>
                 </div>
@@ -223,7 +223,7 @@ export default function ServiceDashboard() {
                     className="h-11 rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-sm font-semibold text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50"
                   >
                     <option value="appointments">Most bookings</option>
-                    <option value="revenue">Highest revenue</option>
+                    <option value="revenue">Highest {DEFAULT_CURRENCY} revenue</option>
                     <option value="completion">Best completion rate</option>
                     <option value="price">Highest price</option>
                     <option value="name">Name A–Z</option>
@@ -315,7 +315,7 @@ function ServiceRow({ service, expanded, onToggle }) {
 
         <div>
           <MobileLabel>Revenue</MobileLabel>
-          <p className="text-sm font-bold text-slate-900">{formatCurrency(service.earning)}</p>
+          <p className="text-sm font-bold text-slate-900">{formatRevenue(service.earning, service.earningsByCurrency)}</p>
         </div>
 
         <div className="flex justify-end sm:col-span-2 xl:col-span-1">
@@ -462,6 +462,7 @@ function buildSummary(services, serverSummary, hasServerStats) {
   const totalAppointments = number(base.totalAppointments)
   return {
     ...base,
+    earningsByCurrency: base.earningsByCurrency || mergeRevenueBreakdowns(services.map((service) => service.earningsByCurrency)),
     completionRate: totalAppointments ? Math.round((number(base.completed) / totalAppointments) * 100) : 0,
   }
 }

@@ -2,19 +2,32 @@ export function getId(value) {
   return value?._id || value?.id || ''
 }
 
-export function formatCurrency(value) {
+const configuredCurrency = String(import.meta.env?.VITE_CURRENCY || 'BDT').trim().toUpperCase()
+const defaultCurrency = ['BDT', 'INR'].includes(configuredCurrency) ? configuredCurrency : 'BDT'
+
+export function formatCurrency(value, currency = defaultCurrency) {
   const amount = Number(value || 0)
+  const requestedCurrency = String(currency).toUpperCase()
+  const displayCurrency = ['BDT', 'INR'].includes(requestedCurrency) ? requestedCurrency : defaultCurrency
   return new Intl.NumberFormat('en-BD', {
     style: 'currency',
-    currency: 'BDT',
-    maximumFractionDigits: 0,
+    currency: displayCurrency,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
   }).format(Number.isFinite(amount) ? amount : 0)
+}
+
+export function paymentCurrency(appointment) {
+  const saved = String(appointment?.payment?.currency || '').toUpperCase()
+  if (['BDT', 'INR'].includes(saved)) return saved
+  // Historical online checkouts were charged in INR; cash fees were displayed in BDT.
+  return appointment?.payment?.method === 'Online' ? 'INR' : 'BDT'
 }
 
 export function formatDate(value, options = {}) {
   if (!value) return 'Date unavailable'
-  const date = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return value
+  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? `${value}T00:00:00` : value)
+  if (Number.isNaN(date.getTime())) return 'Date unavailable'
   return date.toLocaleDateString('en-BD', {
     weekday: options.short ? undefined : 'short',
     month: 'short',
@@ -30,9 +43,10 @@ export function formatAppointmentTime(item) {
 }
 
 export function isAvailable(value) {
+  if (!value) return false
   return value?.availability === undefined
     ? value?.available !== false
-    : String(value.availability).toLowerCase() === 'available'
+    : String(value.availability).trim().toLowerCase() === 'available'
 }
 
 export const WEEK_DAYS = [
@@ -68,8 +82,10 @@ export function normalizeWeeklySchedule(schedule) {
 export function cleanSchedule(schedule, options = {}) {
   const weekly = normalizeWeeklySchedule(schedule)
   const bookedSlots = options.bookedSlots || {}
-  const horizonDays = Math.max(7, Number(options.horizonDays || 28))
-  const start = new Date()
+  const requestedHorizon = Number(options.horizonDays || 28)
+  const horizonDays = Number.isFinite(requestedHorizon) ? Math.min(366, Math.max(7, requestedHorizon)) : 28
+  const start = new Date(options.now ?? Date.now())
+  if (Number.isNaN(start.getTime())) return []
   const nowMinutes = start.getHours() * 60 + start.getMinutes()
   start.setHours(0, 0, 0, 0)
   const output = []
@@ -79,7 +95,7 @@ export function cleanSchedule(schedule, options = {}) {
     date.setDate(start.getDate() + offset)
     const dateKey = localDateKey(date)
     const slots = weekly[WEEKDAY_KEYS[date.getDay()]] || []
-    const booked = new Set((bookedSlots[dateKey] || []).map(normalizeTimeSlot))
+    const booked = new Set((Array.isArray(bookedSlots[dateKey]) ? bookedSlots[dateKey] : []).map(normalizeTimeSlot))
     const availableSlots = slots.filter((slot) => !booked.has(normalizeTimeSlot(slot)) && (offset > 0 || timeSlotMinutes(slot) > nowMinutes))
     if (availableSlots.length) output.push({ date: dateKey, slots: availableSlots })
   }
@@ -92,6 +108,15 @@ export function localDateKey(date) {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+export function appointmentDateTime(item) {
+  if (!item?.date) return null
+  const minutes = timeSlotMinutes(formatAppointmentTime(item))
+  const date = new Date(`${item.date}T00:00:00`)
+  if (!Number.isFinite(minutes) || Number.isNaN(date.getTime())) return null
+  date.setMinutes(minutes)
+  return date
 }
 
 export function statusClass(status) {

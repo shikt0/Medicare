@@ -1,5 +1,7 @@
 import Service from "../models/Service.js";
 import {uploadToCloudinary,deleteFromCloudinary} from "../utils/cloudinary.js";
+import { isObjectId } from "../utils/validation.js";
+import { getPaymentCurrency } from "../utils/paymentCurrency.js";
 
 
 //helper function
@@ -24,7 +26,7 @@ const parseJsonArrayField = (field) => {
 };
 
 //converts into numbers
-const sanitizePrice = (v) => Number(String(v ?? "0").replace(/[^\d.-]/g, "")) || 0;
+const sanitizePrice = (v) => typeof v === 'number' || typeof v === 'string' || v == null ? Number(v ?? 0) : Number.NaN;
 
 //to create a service
 export async function createService(req,res) {
@@ -37,8 +39,8 @@ export async function createService(req,res) {
       .map((instruction) => String(instruction).trim())
       .filter(Boolean))];
     const numericPrice = sanitizePrice(b.price);
-    if (numericPrice < 0) {
-      return res.status(400).json({ success: false, message: "Service price cannot be negative" });
+    if (!Number.isFinite(numericPrice) || numericPrice < 0) {
+      return res.status(400).json({ success: false, message: "Service price must be a nonnegative number" });
     }
     let imageUrl = b.imageUrl || null;
     let imagePublicId = b.imagePublicId || null;
@@ -87,7 +89,7 @@ export async function getServices(req,res) {
         const list = await Service.find().sort({createdAt:-1}).lean();
         return res.status(200).json({
             success:true,
-            data:list.map((service) => ({ ...service, available: true, availability: "Available" }))
+            data:list.map((service) => ({ ...service, currency: getPaymentCurrency(), available: true, availability: "Available" }))
         });
     } catch (err) {
 
@@ -107,6 +109,7 @@ export async function getServices(req,res) {
 export async function getServiceById(req,res) {
     try {
         const {id}= req.params;
+        if (!isObjectId(id)) return res.status(400).json({ success: false, message: "Invalid service ID" });
         const service= await Service.findById(id).lean();
         if(!service) return res.status(404).json({
             success:false,
@@ -115,7 +118,7 @@ export async function getServiceById(req,res) {
 
         return res.status(200).json({
             success:true,
-            data:{ ...service, available: true, availability: "Available" }
+            data:{ ...service, currency: getPaymentCurrency(), available: true, availability: "Available" }
         });
     } catch (err) {
 
@@ -136,6 +139,7 @@ export async function updateService(req,res) {
     try {
 
         const {id}= req.params;
+        if (!isObjectId(id)) return res.status(400).json({ success: false, message: "Invalid service ID" });
         const existing =await Service.findById(id);
         if(!existing) return res.status(404).json({
             success:false,
@@ -159,8 +163,8 @@ export async function updateService(req,res) {
     if (b.shortDescription !== undefined) updateData.shortDescription = b.shortDescription;
     if (b.price !== undefined) {
       const numericPrice = sanitizePrice(b.price);
-      if (numericPrice < 0) {
-        return res.status(400).json({ success: false, message: "Service price cannot be negative" });
+      if (!Number.isFinite(numericPrice) || numericPrice < 0) {
+        return res.status(400).json({ success: false, message: "Service price must be a nonnegative number" });
       }
       updateData.price = numericPrice;
     }
@@ -219,6 +223,7 @@ export async function deleteService(req,res) {
 
    try {
          const {id}=req.params;
+    if (!isObjectId(id)) return res.status(400).json({ success: false, message: "Invalid service ID" });
     const existing =await Service.findById(id);
         if(!existing) return res.status(404).json({
             success:false,

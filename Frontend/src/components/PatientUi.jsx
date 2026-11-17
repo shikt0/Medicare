@@ -16,7 +16,7 @@ export function LoadingGrid({ count = 6 }) {
 }
 
 export function LoadingPanel({ label = 'Loading your care information...' }) {
-  return <div className="patient-loading-panel"><LoaderCircle size={22} className="animate-spin" /><p>{label}</p></div>
+  return <div className="patient-loading-panel" role="status" aria-live="polite"><LoaderCircle size={22} className="animate-spin" /><p>{label}</p></div>
 }
 
 export function ErrorState({ message, onRetry }) {
@@ -39,7 +39,7 @@ export function EmptyState({ title, message, actionLabel, actionTo }) {
 }
 
 export function ImageWithFallback({ src, alt = '', initials = 'MC', className = '' }) {
-  const [failed, setFailed] = useState(false)
-  if (!src || failed) return <span className={`patient-image-fallback ${className}`}>{initials}</span>
-  return <img src={src} alt={alt} className={className} onError={() => setFailed(true)} />
+  const [failedSource, setFailedSource] = useState(null)
+  if (!src || failedSource === src) return <span className={`patient-image-fallback ${className}`} role={alt ? 'img' : undefined} aria-label={alt || undefined}>{initials}</span>
+  return <img src={src} alt={alt} className={className} onError={() => setFailedSource(src)} />
 }

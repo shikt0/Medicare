@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Activity, ArrowLeft, Eye, EyeOff, LoaderCircle, LockKeyhole, Mail, ShieldCheck, Sparkles } from 'lucide-react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useStaffAuth } from '../auth/staffAuth'
 import { ROLE_PORTAL_HOME } from '../auth/rolePortals'
 import logo from '../assets/logo.png'
@@ -9,7 +9,8 @@ const roleLabels = { nurse: 'Nurse', pathologist: 'Pathologist', hr: 'HR', freel
 
 export default function WorkforceAuth({ expectedRole }) {
   const navigate = useNavigate()
-  const { actor, isSignedIn, localAdminBypass, loading, login } = useStaffAuth()
+  const location = useLocation()
+  const { actor, error, isSignedIn, localAdminBypass, loading, login, logout, refreshActor } = useStaffAuth()
   const [form, setForm] = useState({ email: '', password: '' })
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -17,7 +18,11 @@ export default function WorkforceAuth({ expectedRole }) {
   const roleLabel = roleLabels[expectedRole] || 'Staff'
 
   if (localAdminBypass) return <Navigate to="/" replace />
-  if (!loading && isSignedIn) return <Navigate to={actor?.role === expectedRole ? ROLE_PORTAL_HOME[expectedRole] : '/unauthorized'} replace />
+  const requestedPath = location.state?.from?.pathname
+  const portalHome = ROLE_PORTAL_HOME[expectedRole]
+  const destination = requestedPath === portalHome || requestedPath?.startsWith(`${portalHome}/`)
+    ? `${requestedPath}${location.state.from.search || ''}` : portalHome
+  if (!loading && isSignedIn && actor) return <Navigate to={actor.role === expectedRole ? destination : '/unauthorized'} replace />
 
   function updateForm(event) {
     const { name, value } = event.target
@@ -27,7 +32,7 @@ export default function WorkforceAuth({ expectedRole }) {
 
   async function submit(event) {
     event.preventDefault()
-    if (!form.email.trim() || !form.password) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) || !form.password) {
       setFormError('Enter the email and password provided by your administrator.')
       return
     }
@@ -35,8 +40,8 @@ export default function WorkforceAuth({ expectedRole }) {
     setSubmitting(true)
     setFormError('')
     try {
-      const current = await login({ email: form.email.trim(), password: form.password, role: expectedRole })
-      navigate(ROLE_PORTAL_HOME[current.role], { replace: true })
+      await login({ email: form.email.trim(), password: form.password, role: expectedRole })
+      navigate(destination, { replace: true })
     } catch (loginError) {
       setFormError(loginError.message || 'Unable to sign in.')
     } finally {
@@ -65,7 +70,8 @@ export default function WorkforceAuth({ expectedRole }) {
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.16em] text-emerald-700"><Sparkles size={15} /> {roleLabel} secure access</div>
           <div className="mt-5"><h2 className="text-2xl font-extrabold tracking-tight text-slate-950">Sign in to your portal</h2><p className="mt-2 text-sm leading-6 text-slate-500">Only an active {roleLabel.toLowerCase()} account created by Admin can sign in here.</p></div>
 
-          <form onSubmit={submit} className="mt-6" noValidate>
+          {error && isSignedIn && <div role="alert" className="mt-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><p>{error}</p><div className="mt-3 flex flex-wrap gap-4"><button type="button" onClick={refreshActor} className="font-bold">Try again</button><button type="button" onClick={logout} className="font-bold">Use another account</button></div></div>}
+          <form onSubmit={submit} className="mt-6" aria-busy={submitting}>
             <label className="block"><span className="mb-2 block text-xs font-bold text-slate-600">Email address</span><span className="relative block"><Mail size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input type="email" name="email" value={form.email} onChange={updateForm} autoComplete="email" placeholder="staff@medicare.com" className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 text-sm outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10" /></span></label>
             <label className="mt-4 block"><span className="mb-2 block text-xs font-bold text-slate-600">Password</span><span className="relative block"><LockKeyhole size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input type={showPassword ? 'text' : 'password'} name="password" value={form.password} onChange={updateForm} autoComplete="current-password" placeholder="Enter your password" className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-11 text-sm outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10" /><button type="button" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="absolute right-2 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-lg text-slate-400 hover:bg-white hover:text-slate-700">{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></span></label>
             {formError && <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm font-semibold text-rose-700" role="alert">{formError}</p>}

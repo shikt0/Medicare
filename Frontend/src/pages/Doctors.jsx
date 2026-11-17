@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowRight, CalendarDays, MapPin, Search, SlidersHorizontal, Star, Stethoscope, X } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import Footer from '../components/Footer'
 import Navbar from '../components/Navbar'
 import { EmptyState, ErrorState, ImageWithFallback, LoadingGrid, PageIntro } from '../components/PatientUi'
@@ -8,10 +8,19 @@ import { patientApi } from '../lib/api'
 import { cleanSchedule, formatCurrency, getId, isAvailable } from '../lib/format'
 
 export default function Doctors() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [doctors, setDoctors] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [query, setQuery] = useState('')
+  const query = searchParams.get('q') || ''
+  function setQuery(value) {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (value) next.set('q', value)
+      else next.delete('q')
+      return next
+    }, { replace: true })
+  }
   const [specialization, setSpecialization] = useState('All')
   const [availability, setAvailability] = useState('All')
   const [sort, setSort] = useState('recommended')
@@ -20,8 +29,7 @@ export default function Doctors() {
     setLoading(true)
     setError('')
     try {
-      const payload = await patientApi.getDoctors({ limit: 500 })
-      setDoctors(payload.data || payload.doctors || [])
+      setDoctors(await patientApi.getAllDoctors())
     } catch (loadError) {
       setError(loadError.message || 'Unable to load doctors.')
     } finally {
@@ -95,7 +103,7 @@ export default function Doctors() {
 
 function DoctorCard({ doctor }) {
   const available = isAvailable(doctor)
-  const schedule = cleanSchedule(doctor.schedule)
+  const schedule = available ? cleanSchedule(doctor.schedule, { bookedSlots: doctor.bookedSlots }) : []
   const slotCount = schedule.reduce((total, day) => total + day.slots.length, 0)
   const initials = String(doctor.name || 'Doctor').split(' ').filter(Boolean).map((part) => part[0]).join('').slice(0, 2).toUpperCase()
 
@@ -111,7 +119,7 @@ function DoctorCard({ doctor }) {
         <p className="doctor-directory-card__location"><MapPin size={14} /> {doctor.location || 'Location available on request'}</p>
         <div className="doctor-directory-card__metrics">
           <span><Star size={14} fill="currentColor" /> {Number(doctor.rating || 0).toFixed(1)}<small>Rating</small></span>
-          <span><CalendarDays size={14} /> {slotCount}<small>Open slots</small></span>
+          <span><CalendarDays size={14} /> {slotCount}<small>{doctor.bookedSlots ? 'Open slots' : 'Scheduled slots'}</small></span>
           <span>{formatCurrency(doctor.fee)}<small>Consultation</small></span>
         </div>
         <Link to={`/doctors/${getId(doctor)}`}>{available ? 'View & book' : 'View profile'} <ArrowRight size={16} /></Link>

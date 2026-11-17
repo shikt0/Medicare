@@ -3,22 +3,21 @@ import './index.css'
 import App from './App.jsx'
 import { BrowserRouter } from 'react-router-dom'
 import { ClerkProvider } from '@clerk/react'
- 
-
-
-
+import AppBoundary, { AppNotice } from './components/AppBoundary'
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
-if (!PUBLISHABLE_KEY) {
-  throw new Error("Missing Clerk Publishable Key")
-}
-
 createRoot(document.getElementById('root')).render(
-  <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
-  <BrowserRouter>
-    <App />
-  </BrowserRouter>
-  </ClerkProvider> 
-    
-  
+  <AppBoundary>
+    {PUBLISHABLE_KEY ? (
+      <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </ClerkProvider>
+    ) : (
+      <AppNotice title="Patient access is being prepared">
+        MediCare isn’t ready to open on this installation yet. Please try again shortly.
+      </AppNotice>
+    )}
+  </AppBoundary>
 )

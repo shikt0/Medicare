@@ -65,7 +65,7 @@ export default function LoginPortal() {
             <span><ShieldCheck size={25} /></span>
             <p>Secure MediCare access</p>
             <h1>Choose your portal</h1>
-            <small>Select your assigned role to continue. Administrator access is intentionally separate and is not listed here.</small>
+            <small>Choose your patient or professional workspace to continue securely.</small>
           </header>
 
           <div className="portal-directory__grid">
@@ -84,7 +84,7 @@ export default function LoginPortal() {
             })}
           </div>
 
-          <p className="portal-directory__note">Staff use the email and password provided when Admin creates their active staff record.</p>
+          <p className="portal-directory__note">Care professionals: use the account details provided by your MediCare administrator.</p>
         </section>
       </main>
       <Footer />

@@ -7,12 +7,11 @@ import {
   HeartPulse,
   Microscope,
   ShieldCheck,
-  Sparkles,
-  Star,
+  Search,
   Stethoscope,
   UsersRound,
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import Footer from '../components/Footer'
 import Navbar from '../components/Navbar'
 import careTeam from '../assets/BannerImg.png'
@@ -47,32 +46,50 @@ const journey = [
 ]
 
 export default function Home() {
+  const navigate = useNavigate()
+
+  function searchDoctors(event) {
+    event.preventDefault()
+    const query = new FormData(event.currentTarget).get('q').trim()
+    navigate(query ? `/doctors?q=${encodeURIComponent(query)}` : '/doctors')
+  }
+
   return (
-    <div className="patient-site">
+    <div className="patient-site patient-site--home">
       <Navbar />
 
-      <main>
-        <section className="home-hero">
+      <main id="main-content" tabIndex={-1}>
+        <section className="home-hero" aria-labelledby="home-heading">
           <div className="home-hero__orb home-hero__orb--one" aria-hidden="true" />
           <div className="home-hero__orb home-hero__orb--two" aria-hidden="true" />
           <div className="home-hero__inner">
             <div className="home-hero__content">
-              <div className="premium-eyebrow"><Sparkles size={14} /> A better way to access care</div>
-              <h1>Healthcare that feels <em>personal.</em></h1>
-              <p className="home-hero__lead">Discover trusted doctors, essential medical services, and a simpler path to your next appointment—all in one considered experience.</p>
+              <div className="premium-eyebrow"><span className="eyebrow-dot" /> Your partner in better health</div>
+              <h1 id="home-heading">Your health.<br /><em>In good hands.</em></h1>
+              <p className="home-hero__lead">The right care starts with a connection. Find your doctor, explore medical services, and make time for what matters most. You.</p>
 
               <div className="home-hero__actions">
-                <Link to="/doctors" className="premium-button premium-button--primary">Find a doctor <ArrowRight size={17} /></Link>
+                <Link to="/doctors" className="premium-button premium-button--primary">Find your doctor <ArrowRight size={17} /></Link>
                 <Link to="/services" className="premium-button premium-button--secondary">Explore services</Link>
               </div>
+
+              <form className="home-search" onSubmit={searchDoctors} role="search" aria-label="Find a doctor">
+                <label htmlFor="home-doctor-search">Good care starts here</label>
+                <div className="home-search__field">
+                  <Search size={20} aria-hidden="true" />
+                  <input id="home-doctor-search" name="q" type="search" placeholder="Doctor, specialty, or location" autoComplete="off" />
+                  <button type="submit" aria-label="Search doctors"><ArrowRight size={21} /></button>
+                </div>
+                <p>Looking for a test or scan? <Link to="/services">Explore our services <ArrowRight size={12} /></Link></p>
+              </form>
 
               <div className="home-hero__proof">
                 <div className="home-hero__avatars">
                   {[doctorOne, doctorTwo, doctorThree].map((image, index) => <img key={image} src={image} alt="" style={{ zIndex: 3 - index }} />)}
                 </div>
                 <div>
-                  <div className="home-hero__stars"><Star size={13} fill="currentColor" /><Star size={13} fill="currentColor" /><Star size={13} fill="currentColor" /><Star size={13} fill="currentColor" /><Star size={13} fill="currentColor" /></div>
-                  <p>Care built on trust and clarity</p>
+                  <strong>A human approach to healthcare.</strong>
+                  <p>Real people. Personal attention.</p>
                 </div>
               </div>
             </div>
@@ -81,15 +98,12 @@ export default function Home() {
               <div className="home-hero__visual-ring" aria-hidden="true" />
               <div className="home-hero__image-panel">
                 <span className="home-hero__image-label"><span /> Your care team</span>
-                <img src={careTeam} alt="A team of healthcare professionals" />
-              </div>
-              <div className="home-float-card home-float-card--top">
-                <span className="home-float-card__icon"><CalendarCheck size={18} /></span>
-                <div><strong>Easy appointments</strong><small>Book with confidence</small></div>
+                <div className="home-hero__visual-copy"><span>Expertise meets empathy</span><p>Here for you.<br />Every step of the way.</p></div>
+                <img src={careTeam} alt="A team of healthcare professionals" fetchPriority="high" />
               </div>
               <div className="home-float-card home-float-card--bottom">
                 <span className="home-float-card__icon home-float-card__icon--dark"><ShieldCheck size={18} /></span>
-                <div><strong>Trusted professionals</strong><small>Care you can rely on</small></div>
+                <div><strong>A little clarity. A lot of care.</strong><small>Find your next step with MediCare.</small></div>
               </div>
             </div>
           </div>
@@ -140,7 +154,7 @@ export default function Home() {
           <div className="care-team-grid">
             {careTeamCards.map((doctor, index) => (
               <Link to="/doctors" key={doctor.title} className={`care-team-card ${index === 1 ? 'care-team-card--lifted' : ''}`}>
-                <div className="care-team-card__image"><img src={doctor.image} alt="Healthcare professional" /></div>
+                <div className="care-team-card__image"><img src={doctor.image} alt="Healthcare professional" loading="lazy" decoding="async" /></div>
                 <div><span>Available care</span><h3>{doctor.title}</h3><p>{doctor.detail}</p></div>
                 <span className="care-team-card__arrow"><ArrowRight size={15} /></span>
               </Link>

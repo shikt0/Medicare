@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth, useClerk } from '@clerk/react'
 import { CalendarDays, CheckCircle2, Download, FlaskConical, RefreshCw, ShieldCheck, Stethoscope } from 'lucide-react'
 import Footer from '../components/Footer'
@@ -7,20 +7,29 @@ import { EmptyState, ErrorState, LoadingPanel, PageIntro } from '../components/P
 import { patientApi } from '../lib/api'
 
 export default function LabResults() {
-  const { isLoaded, isSignedIn, getToken } = useAuth()
+  const { isLoaded, isSignedIn, getToken, userId } = useAuth()
   const clerk = useClerk()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
+  const requestVersion = useRef(0)
 
   const load = useCallback(async (refresh = false) => {
+    const version = ++requestVersion.current
     if (!isSignedIn) { setItems([]); setLoading(false); return }
     if (refresh) setRefreshing(true); else setLoading(true)
     setError('')
-    try { setItems(await patientApi.getMyLabResults(await getToken())) } catch (loadError) { setError(loadError.message || 'Unable to load laboratory results.') } finally { setLoading(false); setRefreshing(false) }
-  }, [getToken, isSignedIn])
-  useEffect(() => { if (!isLoaded) return undefined; const timeout = window.setTimeout(() => load(), 0); return () => window.clearTimeout(timeout) }, [isLoaded, load])
+    try {
+      const results = await patientApi.getMyLabResults(await getToken())
+      if (version === requestVersion.current) setItems(results)
+    } catch (loadError) {
+      if (version === requestVersion.current) setError(loadError.message || 'Unable to load laboratory results.')
+    } finally {
+      if (version === requestVersion.current) { setLoading(false); setRefreshing(false) }
+    }
+  }, [getToken, isSignedIn, userId])
+  useEffect(() => { if (!isLoaded) return undefined; const timeout = window.setTimeout(() => load(), 0); return () => { window.clearTimeout(timeout); requestVersion.current += 1 } }, [isLoaded, load])
 
   const latest = useMemo(() => [...items].sort((a, b) => new Date(b.completedAt || b.updatedAt) - new Date(a.completedAt || a.updatedAt)), [items])
 

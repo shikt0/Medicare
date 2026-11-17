@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Activity,
   BellRing,
@@ -19,7 +19,7 @@ import {
   UsersRound,
   X,
 } from 'lucide-react'
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import logoImg from '../assets/logo.png'
 import { useStaffAuth } from '../auth/staffAuth'
 import { ROLE_PORTAL_HOME } from '../auth/rolePortals'
@@ -68,19 +68,51 @@ const roleNavGroups = {
 
 export default function Navbar() {
   const [open, setOpen] = useState(false)
+  const menuButton = useRef(null)
+  const mobilePanel = useRef(null)
+  const location = useLocation()
   const { actor, logout } = useStaffAuth()
   const navGroups = actor?.role === 'admin' ? adminNavGroups : (roleNavGroups[actor?.role] || [])
-  const portalName = actor?.role === 'admin' ? 'Admin intelligence' : `${labelize(actor?.role)} portal`
+  const portalName = actor?.role === 'admin' ? 'Administration' : `${labelize(actor?.role)} portal`
   const portalHome = ROLE_PORTAL_HOME[actor?.role] || '/'
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => setOpen(false), 0)
+    return () => window.clearTimeout(timeout)
+  }, [location.pathname])
+
+  useEffect(() => {
+    if (!open) return undefined
+    const previousOverflow = document.body.style.overflow
+    const trigger = menuButton.current
+    document.body.style.overflow = 'hidden'
+    const firstLink = mobilePanel.current?.querySelector('a')
+    firstLink?.focus()
     function closeOnEscape(event) {
       if (event.key === 'Escape') setOpen(false)
+      if (event.key !== 'Tab') return
+      const controls = [menuButton.current, ...mobilePanel.current.querySelectorAll('a, button')].filter(Boolean)
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
-
+    const desktop = window.matchMedia('(min-width: 1024px)')
+    const closeOnDesktop = (event) => { if (event.matches) setOpen(false) }
+    desktop.addEventListener('change', closeOnDesktop)
     window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [])
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape)
+      desktop.removeEventListener('change', closeOnDesktop)
+      document.body.style.overflow = previousOverflow
+      trigger?.focus()
+    }
+  }, [open])
 
   return (
     <>
@@ -138,6 +170,7 @@ export default function Navbar() {
 
         <button
           type="button"
+          ref={menuButton}
           onClick={() => setOpen((current) => !current)}
           aria-label={open ? 'Close navigation' : 'Open navigation'}
           aria-expanded={open}
@@ -156,7 +189,7 @@ export default function Navbar() {
             onClick={() => setOpen(false)}
             className="admin-mobile-navigation__backdrop"
           />
-          <nav id="mobile-admin-navigation" aria-label="Mobile admin navigation" className="admin-mobile-navigation__panel">
+          <nav ref={mobilePanel} id="mobile-admin-navigation" aria-label="Mobile admin navigation" className="admin-mobile-navigation__panel">
             <div className="mb-4 flex items-center justify-between px-1">
               <div>
                 <p className="text-sm font-extrabold text-slate-950">{labelize(actor?.role)} workspace</p>

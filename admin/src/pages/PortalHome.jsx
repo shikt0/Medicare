@@ -39,10 +39,11 @@ function StaffHome({ role }) {
   const config = configs[role] || configs.nurse
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let current = true
-    api.getDashboard().then((value) => { if (current) setData(value) }).catch((loadError) => { if (current) setError(loadError.message) })
+    api.getDashboard().then((value) => { if (current) setData(value) }).catch((loadError) => { if (current) setError(loadError.message) }).finally(() => { if (current) setLoading(false) })
     return () => { current = false }
   }, [])
 
@@ -51,7 +52,7 @@ function StaffHome({ role }) {
       <div className="mx-auto max-w-7xl">
         <PageHeader title={config.title} subtitle={config.subtitle} />
         <ErrorMessage message={error} />
-        {!data ? <Panel><LoadingState label="Loading your dashboard..." /></Panel> : (
+        {loading ? <Panel><LoadingState label="Loading your dashboard..." /></Panel> : data ? (
           <>
             <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {config.stats.map(([label, key]) => <StatCard key={key} label={label} value={formatValue(data[key], key)} />)}
@@ -63,7 +64,7 @@ function StaffHome({ role }) {
               </div>
             </Panel>
           </>
-        )}
+        ) : null}
       </div>
     </main>
   )

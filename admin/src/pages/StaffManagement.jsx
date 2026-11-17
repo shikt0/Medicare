@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { createPortal } from 'react-dom'
+import DialogPortal from '../components/DialogPortal'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BadgeCheck, BriefcaseBusiness, CheckCircle2, ChevronRight, CircleOff, Clock3,
   Filter, HeartPulse, LoaderCircle, Mail, MapPin, Pencil, Phone, Plus, RefreshCw,
@@ -45,8 +45,10 @@ export default function StaffManagement() {
   const [editor, setEditor] = useState(null)
   const [selected, setSelected] = useState(null)
   const [statusTarget, setStatusTarget] = useState(null)
+  const requestSequence = useRef(0)
 
   const loadStaff = useCallback(async (quiet = false) => {
+    const requestId = ++requestSequence.current
     if (quiet) setRefreshing(true)
     else setLoading(true)
     setError('')
@@ -55,6 +57,7 @@ export default function StaffManagement() {
         api.getStaff({ q: query.trim(), role, department, status, limit: 200 }),
         api.getStaffStats(),
       ])
+      if (requestId !== requestSequence.current) return
       setStaff(list.data || [])
       setDepartments(list.facets?.departments || [])
       setStats(staffStats || emptyStats)
@@ -62,24 +65,25 @@ export default function StaffManagement() {
         ? (list.data || []).find((item) => item.id === current.id) || null
         : null)
     } catch (loadError) {
+      if (requestId !== requestSequence.current) return
       setError(loadError.message || 'Unable to load staff records.')
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (requestId === requestSequence.current) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [department, query, role, status])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => loadStaff(), 250)
-    return () => window.clearTimeout(timeout)
+    return () => {
+      window.clearTimeout(timeout)
+      requestSequence.current += 1
+    }
   }, [loadStaff])
 
-  useEffect(() => {
-    if (!editor && !selected && !statusTarget) return undefined
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = previousOverflow }
-  }, [editor, selected, statusTarget])
+
 
   function updateFilters(values) {
     const next = new URLSearchParams(searchParams)
@@ -177,8 +181,8 @@ export default function StaffManagement() {
       </div>
 
       {canManage && editor && <StaffEditor staff={editor.id ? editor : null} onClose={() => setEditor(null)} onSave={saveStaff} />}
-      {selected && createPortal(<StaffProfile staff={selected} canManage={canManage} onClose={() => setSelected(null)} onEdit={() => { setEditor(selected); setSelected(null) }} onStatus={() => setStatusTarget(selected)} />, document.body)}
-      {canManage && statusTarget && createPortal(<StatusConfirm staff={statusTarget} onClose={() => setStatusTarget(null)} onConfirm={changeStatus} />, document.body)}
+      {selected && <StaffProfile staff={selected} canManage={canManage} onClose={() => setSelected(null)} onEdit={() => { setEditor(selected); setSelected(null) }} onStatus={() => setStatusTarget(selected)} />}
+      {canManage && statusTarget && <StatusConfirm staff={statusTarget} onClose={() => setStatusTarget(null)} onConfirm={changeStatus} />}
     </main>
   )
 }
@@ -235,34 +239,33 @@ function StaffEditor({ staff, onClose, onSave }) {
     }
   }
 
-  return createPortal(
-    <div className="fixed inset-0 z-[100] grid place-items-center p-3 sm:p-5 lg:pl-[20rem]" role="dialog" aria-modal="true" aria-labelledby="staff-editor-title">
-      <button type="button" className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" onClick={onClose} aria-label="Close editor" />
-      <form onSubmit={submit} className="relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:max-h-[calc(100dvh-2.5rem)] sm:rounded-3xl">
-        <header className="flex shrink-0 items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6"><div><p className="text-xs font-bold uppercase tracking-[.15em] text-emerald-700">Workforce record</p><h2 id="staff-editor-title" className="mt-1 text-xl font-extrabold text-slate-950">{staff ? 'Edit staff member' : 'Add staff member'}</h2></div><button type="button" onClick={onClose} disabled={saving} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500"><X size={18} /></button></header>
+  return <DialogPortal onClose={onClose} busy={saving} label="Staff editor"><div className="fixed inset-0 z-[100] grid place-items-center p-3 sm:p-5" role="dialog" aria-modal="true" aria-labelledby="staff-editor-title">
+      <button data-dialog-close="" disabled={saving} data-dialog-backdrop="" tabIndex={-1} type="button" className="absolute inset-0 bg-slate-950/50 " onClick={onClose} aria-label="Close editor" />
+      <form data-dialog-panel="" onSubmit={submit} className="relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:max-h-[calc(100dvh-2.5rem)] sm:rounded-3xl">
+        <header className="flex shrink-0 items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6"><div><p className="text-xs font-bold uppercase tracking-[.15em] text-emerald-700">Workforce record</p><h2 id="staff-editor-title" className="mt-1 text-xl font-extrabold text-slate-950">{staff ? 'Edit staff member' : 'Add staff member'}</h2></div><button data-dialog-close="" type="button" onClick={onClose} disabled={saving} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500"><X size={18} /></button></header>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6">
-          {error && <p className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700" role="alert">{error}</p>}
+          {error && <p className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700" >{error}</p>}
           <FormSection title="Identity and role"><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><Field label="Employee ID" name="employeeId" value={form.employeeId} onChange={update} required /><Field label="Full name" name="name" value={form.name} onChange={update} required /><Field label="Email address" name="email" type="email" value={form.email} onChange={update} required /><Field label="Phone" name="phone" value={form.phone} onChange={update} /><Select label="Role" name="role" value={form.role} onChange={update}>{ROLE_TABS.slice(1).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</Select><Field label="Profile image URL" name="imageUrl" value={form.imageUrl} onChange={update} /></div></FormSection>
           <FormSection title="Portal login credentials"><div className="grid gap-4 sm:grid-cols-2"><Field label={staff ? 'New password' : 'Initial password'} name="password" type="password" autoComplete="new-password" minLength="8" maxLength="72" value={form.password} onChange={update} required={!staff} placeholder={staff ? 'Leave blank to keep the current password' : 'At least 8 characters'} /><Field label="Confirm password" name="confirmPassword" type="password" autoComplete="new-password" minLength="8" maxLength="72" value={form.confirmPassword} onChange={update} required={!staff || Boolean(form.password)} placeholder="Enter the password again" /></div><p className="mt-3 text-xs leading-5 text-slate-500">Give these credentials only to this staff member. The password is securely hashed and cannot be viewed after saving.{staff && ' Enter a new password only when resetting access.'}</p></FormSection>
           <FormSection title="Employment details"><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><Field label="Department" name="department" value={form.department} onChange={update} /><Field label="Designation" name="designation" value={form.designation} onChange={update} /><Field label="Joining date" name="joiningDate" type="date" value={form.joiningDate} onChange={update} /><Select label="Employment type" name="employmentType" value={form.employmentType} onChange={update}>{EMPLOYMENT_TYPES.map((item) => <option key={item} value={item}>{labelize(item)}</option>)}</Select><Select label="Status" name="status" value={form.status} onChange={update}>{STATUSES.map((item) => <option key={item} value={item}>{labelize(item)}</option>)}</Select><Field label="Qualification" name="qualification" value={form.qualification} onChange={update} /></div><label className="mt-4 block"><span className="mb-1.5 block text-xs font-bold text-slate-600">Address</span><textarea name="address" value={form.address} onChange={update} rows="2" maxLength="500" className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm outline-none" /></label></FormSection>
           <FormSection title="Emergency contact"><div className="grid gap-4 sm:grid-cols-3"><Field label="Contact name" name="emergencyName" value={form.emergencyName} onChange={update} /><Field label="Relationship" name="emergencyRelationship" value={form.emergencyRelationship} onChange={update} /><Field label="Phone" name="emergencyPhone" value={form.emergencyPhone} onChange={update} /></div></FormSection>
         </div>
-        <footer className="flex shrink-0 justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:px-6"><button type="button" onClick={onClose} disabled={saving} className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700">Cancel</button><button type="submit" disabled={saving} className="inline-flex h-11 items-center gap-2 rounded-xl bg-emerald-700 px-5 text-sm font-bold text-white disabled:opacity-60">{saving && <LoaderCircle size={16} className="animate-spin" />}{saving ? 'Saving...' : staff ? 'Save changes' : 'Add staff'}</button></footer>
+        <footer className="flex shrink-0 justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:px-6"><button data-dialog-close="" type="button" onClick={onClose} disabled={saving} className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700">Cancel</button><button type="submit" disabled={saving} className="inline-flex h-11 items-center gap-2 rounded-xl bg-emerald-700 px-5 text-sm font-bold text-white disabled:opacity-60">{saving && <LoaderCircle size={16} className="animate-spin" />}{saving ? 'Saving...' : staff ? 'Save changes' : 'Add staff'}</button></footer>
       </form>
-    </div>,
-    document.body,
-  )
+    </div></DialogPortal>
 }
 
 function StaffProfile({ staff, canManage, onClose, onEdit, onStatus }) {
   return (
-    <div className="fixed inset-0 z-[90] flex justify-end" role="dialog" aria-modal="true" aria-labelledby="staff-profile-title"><button type="button" className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" onClick={onClose} aria-label="Close profile" /><section className="relative flex h-full w-full max-w-xl flex-col bg-slate-50 shadow-2xl"><header className="flex items-center justify-between border-b border-slate-200 bg-white p-5"><div><p className="text-xs font-bold uppercase tracking-[.15em] text-emerald-700">Staff profile</p><h2 id="staff-profile-title" className="mt-1 text-xl font-extrabold text-slate-950">{staff.name}</h2></div><button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500"><X size={18} /></button></header><div className="flex-1 overflow-y-auto p-5"><div className="rounded-2xl border border-slate-200 bg-white p-5"><div className="flex items-center gap-4"><Avatar staff={staff} large /><div><p className="text-lg font-extrabold text-slate-950">{staff.name}</p><p className="mt-1 text-sm text-slate-500">{staff.designation || labelize(staff.role)}</p><div className="mt-2 flex flex-wrap gap-2"><StatusBadge value={staff.status} /><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${staff.accountLinked ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700'}`}>{staff.accountLinked ? 'Login linked' : 'Awaiting login link'}</span></div></div></div></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><Detail icon={UserRound} label="Employee ID" value={staff.employeeId} /><Detail icon={HeartPulse} label="Role" value={labelize(staff.role)} /><Detail icon={BriefcaseBusiness} label="Department" value={staff.department || 'Not assigned'} /><Detail icon={Clock3} label="Employment" value={labelize(staff.employmentType)} /><Detail icon={Mail} label="Email" value={staff.email} /><Detail icon={Phone} label="Phone" value={staff.phone || 'Not provided'} /><Detail icon={BadgeCheck} label="Qualification" value={staff.qualification || 'Not provided'} /><Detail icon={MapPin} label="Address" value={staff.address || 'Not provided'} /></div>{staff.emergencyContact && <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4"><p className="text-xs font-bold uppercase tracking-[.12em] text-slate-400">Emergency contact</p><p className="mt-2 font-bold text-slate-800">{staff.emergencyContact.name || 'Not provided'}</p><p className="mt-1 text-sm text-slate-500">{[staff.emergencyContact.relationship, staff.emergencyContact.phone].filter(Boolean).join(' · ') || 'No contact details'}</p></div>}</div>{canManage && <footer className="flex gap-2 border-t border-slate-200 bg-white p-4"><button type="button" onClick={onEdit} className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-700 text-sm font-bold text-white"><Pencil size={16} /> Edit profile</button><button type="button" onClick={onStatus} className={`inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border text-sm font-bold ${staff.status === 'inactive' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}><CircleOff size={16} />{staff.status === 'inactive' ? 'Reactivate' : 'Deactivate'}</button></footer>}</section></div>
+    <DialogPortal onClose={onClose} busy={false} label="Staff profile"><div className="fixed inset-0 z-[90] flex justify-end" role="dialog" aria-modal="true" aria-labelledby="staff-profile-title"><button data-dialog-close="" disabled={false} data-dialog-backdrop="" tabIndex={-1} type="button" className="absolute inset-0 bg-slate-950/45 " onClick={onClose} aria-label="Close profile" /><section data-dialog-panel="" data-dialog-drawer="" className="relative flex h-full w-full max-w-xl flex-col bg-slate-50 shadow-2xl"><header className="flex items-center justify-between border-b border-slate-200 bg-white p-5"><div><p className="text-xs font-bold uppercase tracking-[.15em] text-emerald-700">Staff profile</p><h2 id="staff-profile-title" className="mt-1 text-xl font-extrabold text-slate-950">{staff.name}</h2></div><button data-dialog-close="" disabled={false} type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-500"><X size={18} /></button></header><div className="flex-1 overflow-y-auto p-5"><div className="rounded-2xl border border-slate-200 bg-white p-5"><div className="flex items-center gap-4"><Avatar staff={staff} large /><div><p className="text-lg font-extrabold text-slate-950">{staff.name}</p><p className="mt-1 text-sm text-slate-500">{staff.designation || labelize(staff.role)}</p><div className="mt-2 flex flex-wrap gap-2"><StatusBadge value={staff.status} /><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${staff.accountLinked ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700'}`}>{staff.accountLinked ? 'Login linked' : 'Awaiting login link'}</span></div></div></div></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><Detail icon={UserRound} label="Employee ID" value={staff.employeeId} /><Detail icon={HeartPulse} label="Role" value={labelize(staff.role)} /><Detail icon={BriefcaseBusiness} label="Department" value={staff.department || 'Not assigned'} /><Detail icon={Clock3} label="Employment" value={labelize(staff.employmentType)} /><Detail icon={Mail} label="Email" value={staff.email} /><Detail icon={Phone} label="Phone" value={staff.phone || 'Not provided'} /><Detail icon={BadgeCheck} label="Qualification" value={staff.qualification || 'Not provided'} /><Detail icon={MapPin} label="Address" value={staff.address || 'Not provided'} /></div>{staff.emergencyContact && <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4"><p className="text-xs font-bold uppercase tracking-[.12em] text-slate-400">Emergency contact</p><p className="mt-2 font-bold text-slate-800">{staff.emergencyContact.name || 'Not provided'}</p><p className="mt-1 text-sm text-slate-500">{[staff.emergencyContact.relationship, staff.emergencyContact.phone].filter(Boolean).join(' · ') || 'No contact details'}</p></div>}</div>{canManage && <footer className="flex gap-2 border-t border-slate-200 bg-white p-4"><button type="button" onClick={onEdit} className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-700 text-sm font-bold text-white"><Pencil size={16} /> Edit profile</button><button type="button" onClick={onStatus} className={`inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border text-sm font-bold ${staff.status === 'inactive' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}><CircleOff size={16} />{staff.status === 'inactive' ? 'Reactivate' : 'Deactivate'}</button></footer>}</section></div></DialogPortal>
   )
 }
 
 function StatusConfirm({ staff, onClose, onConfirm }) {
+  const [saving, setSaving] = useState(false)
+  async function confirm() { if (saving) return; setSaving(true); try { await onConfirm() } finally { setSaving(false) } }
   const activate = staff.status === 'inactive'
-  return <div className="fixed inset-0 z-[110] grid place-items-center px-4" role="dialog" aria-modal="true"><button type="button" className="absolute inset-0 bg-slate-950/50" onClick={onClose} aria-label="Close" /><section className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><span className={`grid h-12 w-12 place-items-center rounded-2xl ${activate ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}><CircleOff size={23} /></span><h2 className="mt-4 text-xl font-extrabold text-slate-950">{activate ? 'Reactivate' : 'Deactivate'} {staff.name}?</h2><p className="mt-2 text-sm leading-6 text-slate-500">{activate ? 'This restores access when the employee signs in with their linked account.' : 'The record and history are retained, but staff portal access is blocked.'}</p><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={onClose} className="h-10 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700">Cancel</button><button type="button" onClick={onConfirm} className={`h-10 rounded-xl px-4 text-sm font-bold text-white ${activate ? 'bg-emerald-700' : 'bg-rose-600'}`}>{activate ? 'Reactivate' : 'Deactivate'}</button></div></section></div>
+  return <DialogPortal onClose={onClose} busy={saving} label="Change staff status"><div className="fixed inset-0 z-[110] grid place-items-center px-4" role="dialog" aria-modal="true"><button data-dialog-close="" disabled={saving} data-dialog-backdrop="" tabIndex={-1} type="button" className="absolute inset-0 bg-slate-950/50" onClick={onClose} aria-label="Close" /><section data-dialog-panel="" className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><span className={`grid h-12 w-12 place-items-center rounded-2xl ${activate ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}><CircleOff size={23} /></span><h2 className="mt-4 text-xl font-extrabold text-slate-950">{activate ? 'Reactivate' : 'Deactivate'} {staff.name}?</h2><p className="mt-2 text-sm leading-6 text-slate-500">{activate ? 'This restores access when the employee signs in with their linked account.' : 'The record and history are retained, but staff portal access is blocked.'}</p><div className="mt-6 flex justify-end gap-2"><button data-dialog-close="" disabled={saving} type="button" onClick={onClose} className="h-10 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700">Cancel</button><button type="button" onClick={confirm} disabled={saving} className={`h-10 rounded-xl px-4 text-sm font-bold text-white ${activate ? 'bg-emerald-700' : 'bg-rose-600'}`}>{activate ? 'Reactivate' : 'Deactivate'}</button></div></section></div></DialogPortal>
 }
 
 function SummaryCard({ icon: Icon, label, value, detail, tone }) {

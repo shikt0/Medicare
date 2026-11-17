@@ -10,13 +10,15 @@ const CLERK_CACHE_TTL_MS = 30_000
 const clerkUserCache = new Map()
 
 export function isLocalAdminRequest(req) {
-  if (process.env.NODE_ENV === 'production') return false
+  if (process.env.NODE_ENV === 'production' || process.env.ENABLE_LOCAL_ADMIN !== 'true') return false
+  const address = req.socket?.remoteAddress
+  if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address)) return false
   const origin = String(req.get?.('origin') || '').replace(/\/$/, '')
   return origin === 'http://localhost:5174' || origin === 'http://127.0.0.1:5174'
 }
 
 function bearerToken(req) {
-  const header = req.headers.authorization || ''
+  const header = req.headers?.authorization || ''
   return header.startsWith('Bearer ') ? header.slice(7).trim() : ''
 }
 
@@ -211,7 +213,7 @@ export function sanitizeStaff(staff) {
   const value = staff?.toObject ? staff.toObject() : { ...staff }
   value.id = String(value._id || value.id || '')
   value.loginEnabled = Boolean(value.passwordSetAt || value.password)
-  value.accountLinked = value.loginEnabled
+  value.accountLinked = Boolean(value.authUserId || value.loginEnabled)
   delete value.password
   delete value.authUserId
   delete value.createdBy

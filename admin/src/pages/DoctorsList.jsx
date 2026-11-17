@@ -1,3 +1,4 @@
+import DialogPortal from '../components/DialogPortal'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   CalendarDays,
@@ -18,7 +19,7 @@ import {
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
-import { formatCurrency, getId } from '../lib/format'
+import { DEFAULT_CURRENCY, formatCurrency, formatRevenue, getId, mergeRevenueBreakdowns, revenueAmount } from '../lib/format'
 
 const FILTERS = ['All', 'Available', 'Unavailable']
 const WEEK_DAYS = [
@@ -71,16 +72,7 @@ export default function DoctorsList() {
     return () => window.clearTimeout(timeout)
   }, [loadDoctors])
 
-  useEffect(() => {
-    if (!pendingDelete) return undefined
 
-    function closeOnEscape(event) {
-      if (event.key === 'Escape' && !deleting) setPendingDelete(null)
-    }
-
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [deleting, pendingDelete])
 
   const summary = useMemo(() => ({
     available: doctors.filter(isAvailable).length,
@@ -107,7 +99,7 @@ export default function DoctorsList() {
 
     return [...records].sort((first, second) => {
       if (sort === 'appointments') return metric(second, 'appointmentsTotal') - metric(first, 'appointmentsTotal')
-      if (sort === 'earnings') return finiteNumber(second.earnings) - finiteNumber(first.earnings)
+      if (sort === 'earnings') return revenueAmount(second.earningsByCurrency) - revenueAmount(first.earningsByCurrency)
       if (sort === 'rating') return finiteNumber(second.rating) - finiteNumber(first.rating)
       return doctorName(first).localeCompare(doctorName(second))
     })
@@ -204,7 +196,7 @@ export default function DoctorsList() {
           <SummaryCard icon={UsersRound} label="Doctor records" value={totalRecords} detail={loadedDetail(doctors.length, totalRecords)} tone="sky" />
           <SummaryCard icon={UserRoundCheck} label="Available" value={summary.available} detail="Accepting appointments" tone="emerald" />
           <SummaryCard icon={CalendarDays} label="Appointments" value={summary.appointments} detail={`${summary.completed} confirmed or completed`} tone="violet" />
-          <SummaryCard icon={CircleDollarSign} label="Provider earnings" value={formatCurrency(summary.earnings)} detail="Confirmed and completed visits" tone="amber" />
+          <SummaryCard icon={CircleDollarSign} label="Provider earnings" value={formatRevenue(summary.earnings, mergeRevenueBreakdowns(doctors.map((doctor) => doctor.earningsByCurrency)))} detail="Completed paid visits, by currency" tone="amber" />
         </section>
 
         <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -249,7 +241,7 @@ export default function DoctorsList() {
                   >
                     <option value="name">Name A–Z</option>
                     <option value="appointments">Most appointments</option>
-                    <option value="earnings">Highest earnings</option>
+                    <option value="earnings">Highest {DEFAULT_CURRENCY} earnings</option>
                     <option value="rating">Highest rating</option>
                   </select>
                 </label>
@@ -352,7 +344,7 @@ function DoctorCard({ doctor, expanded, onToggle, onDelete }) {
         <div className="mt-5 grid grid-cols-3 divide-x divide-slate-100 rounded-xl bg-slate-50 py-3 text-center">
           <Metric label="Appointments" value={metric(doctor, 'appointmentsTotal')} />
           <Metric label="Completed" value={metric(doctor, 'appointmentsCompleted')} />
-          <Metric label="Earnings" value={formatCompactCurrency(doctor.earnings)} />
+          <Metric label="Earnings" value={formatRevenue(doctor.earnings, doctor.earningsByCurrency)} />
         </div>
 
         <div className="mt-4 flex items-center justify-between gap-3">
@@ -428,9 +420,9 @@ function DoctorCard({ doctor, expanded, onToggle, onDelete }) {
 
 function DeleteDoctorModal({ doctor, deleting, error, onCancel, onConfirm }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center px-4" role="dialog" aria-modal="true" aria-labelledby="delete-doctor-title">
-      <button type="button" aria-label="Close delete confirmation" onClick={onCancel} className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" />
-      <div className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+    <DialogPortal onClose={onCancel} busy={deleting} label="Delete doctor"><div className="fixed inset-0 z-50 grid place-items-center px-4" role="dialog" aria-modal="true" aria-labelledby="delete-doctor-title">
+      <button data-dialog-close="" disabled={deleting} data-dialog-backdrop="" tabIndex={-1} type="button" aria-label="Close delete confirmation" onClick={onCancel} className="absolute inset-0 bg-slate-950/45 " />
+      <div data-dialog-panel="" className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
         <div className="flex items-start gap-4">
           <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-rose-50 text-rose-600">
             <Trash2 size={20} />
@@ -448,10 +440,10 @@ function DeleteDoctorModal({ doctor, deleting, error, onCancel, onConfirm }) {
             This doctor is linked to {metric(doctor, 'appointmentsTotal')} appointment {metric(doctor, 'appointmentsTotal') === 1 ? 'record' : 'records'}.
           </div>
         )}
-        {error && <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">{error}</p>}
+        {error && <p  className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">{error}</p>}
 
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button
+          <button data-dialog-close=""
             type="button"
             onClick={onCancel}
             disabled={deleting}
@@ -470,7 +462,7 @@ function DeleteDoctorModal({ doctor, deleting, error, onCancel, onConfirm }) {
           </button>
         </div>
       </div>
-    </div>
+    </div></DialogPortal>
   )
 }
 
@@ -591,12 +583,6 @@ function metric(doctor, field) {
 function finiteNumber(value) {
   const number = Number(value)
   return Number.isFinite(number) ? number : 0
-}
-
-function formatCompactCurrency(value) {
-  const number = finiteNumber(value)
-  if (number < 1000) return formatCurrency(number)
-  return `৳${new Intl.NumberFormat('en-BD', { notation: 'compact', maximumFractionDigits: 1 }).format(number)}`
 }
 
 function initials(name) {

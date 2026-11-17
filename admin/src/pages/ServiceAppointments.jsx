@@ -1,3 +1,4 @@
+import DialogPortal from '../components/DialogPortal'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   CalendarDays,
@@ -22,6 +23,8 @@ import { api } from '../lib/api'
 import { useStaffAuth } from '../auth/staffAuth'
 import {
   formatCurrency,
+  bookingCurrency,
+  formatRevenue,
   getId,
   serviceNameFromAppointment,
 } from '../lib/format'
@@ -80,7 +83,7 @@ export default function ServiceAppointments() {
       setError(loadError.message || 'Unable to load service requests.')
       return false
     } finally {
-      if (!quiet && requestId === requestSequence.current) setLoading(false)
+      if (requestId === requestSequence.current) setLoading(false)
     }
   }, [])
 
@@ -100,7 +103,10 @@ export default function ServiceAppointments() {
     const timeout = window.setTimeout(() => {
       fetchAppointments({ search: search.trim(), status, page, limit: PAGE_SIZE })
     }, search ? 300 : 0)
-    return () => window.clearTimeout(timeout)
+    return () => {
+      window.clearTimeout(timeout)
+      requestSequence.current += 1
+    }
   }, [fetchAppointments, page, search, status])
 
   useEffect(() => {
@@ -114,24 +120,7 @@ export default function ServiceAppointments() {
     return () => window.clearTimeout(timeout)
   }, [success])
 
-  useEffect(() => {
-    const modalOpen = Boolean(selectedAppointment || pendingAction)
-    if (!modalOpen) return undefined
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
 
-    function closeOnEscape(event) {
-      if (event.key !== 'Escape' || workingId) return
-      setSelectedAppointment(null)
-      setPendingAction(null)
-    }
-
-    window.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.body.style.overflow = previousOverflow
-      window.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [pendingAction, selectedAppointment, workingId])
 
   const totalPages = Math.max(1, Math.ceil(Number(meta.total || 0) / PAGE_SIZE))
   const statusCounts = {
@@ -290,7 +279,7 @@ export default function ServiceAppointments() {
           <SummaryCard icon={CalendarDays} label="Total requests" value={summary.totalAppointments} detail={`${summary.canceled} canceled requests`} tone="sky" />
           <SummaryCard icon={Clock3} label="Pending" value={summary.pending} detail={isAdmin ? 'Needs admin follow-up' : 'Needs your attention'} tone="amber" />
           <SummaryCard icon={CheckCircle2} label="Completed" value={summary.completed} detail={`${summary.confirmed} currently confirmed`} tone="emerald" />
-          <SummaryCard icon={WalletCards} label="Service revenue" value={formatCurrency(summary.earning)} detail="Completed services marked paid" tone="violet" />
+          <SummaryCard icon={WalletCards} label="Service revenue" value={formatRevenue(summary.earning, summary.earningsByCurrency)} detail="Completed paid services, by currency" tone="violet" />
         </section>
 
         <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -409,7 +398,7 @@ function AppointmentRow({ appointment, workingId, onStatusChange, onManage }) {
       </div>
 
       <div><MobileLabel>Requested / assigned</MobileLabel><p className="text-sm font-semibold text-slate-700">{formatRequestDateTime(appointment.requestedAt || appointment.createdAt)}</p><p className="mt-0.5 truncate text-xs text-slate-500">{pathologistName(appointment)}</p></div>
-      <div><MobileLabel>Payment</MobileLabel><PaymentBadge value={appointment.payment?.status || 'Pending'} /><p className="mt-1 text-xs font-bold text-slate-700">{formatCurrency(appointment.fees ?? appointment.payment?.amount)}</p></div>
+      <div><MobileLabel>Payment</MobileLabel><PaymentBadge value={appointment.payment?.status || 'Pending'} /><p className="mt-1 text-xs font-bold text-slate-700">{formatCurrency(appointment.fees ?? appointment.payment?.amount, bookingCurrency(appointment))}</p></div>
 
       <div>
         <MobileLabel>Status</MobileLabel>
@@ -465,7 +454,7 @@ function AppointmentModal({ appointment, busy, isAdmin, onClose, onSaveNotes, on
           <Detail icon={CalendarDays} label="Requested" value={formatRequestDateTime(appointment.requestedAt || appointment.createdAt)} detail="24/7 request" />
           <Detail icon={UserRound} label="Assigned pathologist" value={pathologistName(appointment)} detail={appointment.assignedPathologistEmployeeId || appointment.assignedPathologist?.employeeId || ''} />
           <Detail icon={CreditCard} label="Payment" value={appointment.payment?.method || 'Cash'} detail={appointment.payment?.status || 'Pending'} />
-          <Detail icon={WalletCards} label="Service fee" value={formatCurrency(appointment.fees ?? appointment.payment?.amount)} />
+          <Detail icon={WalletCards} label="Service fee" value={formatCurrency(appointment.fees ?? appointment.payment?.amount, bookingCurrency(appointment))} />
         </div>
 
         <form onSubmit={submitNotes} className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -519,7 +508,7 @@ function ConfirmActionModal({ action, busy, onClose, onConfirm }) {
 }
 
 function ModalShell({ children, onClose, titleId, closeDisabled, size = 'max-w-2xl' }) {
-  return <div className="fixed inset-0 z-50 grid place-items-center px-4 py-6" role="dialog" aria-modal="true" aria-labelledby={titleId}><button type="button" aria-label="Close dialog" onClick={onClose} disabled={closeDisabled} className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm disabled:cursor-wait" /><section className={`relative w-full ${size} overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl`}>{children}</section></div>
+  return <DialogPortal onClose={onClose} busy={closeDisabled} label="Service booking"><div className="fixed inset-0 z-50 grid place-items-center px-4 py-6" role="dialog" aria-modal="true" aria-labelledby={titleId}><button data-dialog-close="" data-dialog-backdrop="" tabIndex={-1} type="button" aria-label="Close dialog" onClick={onClose} disabled={closeDisabled} className="absolute inset-0 bg-slate-950/45  disabled:cursor-wait" /><section data-dialog-panel="" className={`relative w-full ${size} overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl`}>{children}</section></div></DialogPortal>
 }
 
 function SummaryCard({ icon: CardIcon, label, value, detail, tone }) {
@@ -578,7 +567,7 @@ function actionContent(type, appointment) {
   if (type === 'paid') return {
     danger: false,
     title: 'Mark this payment as paid?',
-    message: `This records ${formatCurrency(appointment.fees ?? appointment.payment?.amount)} as paid. Pending bookings will also be confirmed.`,
+    message: `This records ${formatCurrency(appointment.fees ?? appointment.payment?.amount, bookingCurrency(appointment))} as paid. Pending bookings will also be confirmed.`,
     button: 'Mark as paid',
   }
   return {

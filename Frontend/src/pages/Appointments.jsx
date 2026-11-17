@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import DialogPortal from '../components/DialogPortal'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth, useClerk } from '@clerk/react'
-import { CalendarCheck, CalendarDays, CheckCircle2, Clock3, LoaderCircle, RefreshCw, ShieldCheck, Stethoscope, X, XCircle } from 'lucide-react'
+import { Banknote, CalendarCheck, CalendarDays, CheckCircle2, Clock3, LoaderCircle, RefreshCw, ShieldCheck, Stethoscope, X, XCircle } from 'lucide-react'
 import Footer from '../components/Footer'
 import Navbar from '../components/Navbar'
 import { EmptyState, ErrorState, ImageWithFallback, LoadingPanel, PageIntro } from '../components/PatientUi'
 import { patientApi } from '../lib/api'
-import { appointmentImage, formatAppointmentTime, formatCurrency, formatDate, getId, statusClass } from '../lib/format'
+import { appointmentDateTime, appointmentImage, formatAppointmentTime, formatCurrency, formatDate, getId, paymentCurrency, statusClass } from '../lib/format'
 
 const statuses = ['All', 'Pending', 'Confirmed', 'Rescheduled', 'Completed', 'Canceled']
 
 export default function Appointments() {
-  const { isLoaded, isSignedIn, getToken } = useAuth()
+  const { isLoaded, isSignedIn, getToken, userId } = useAuth()
   const clerk = useClerk()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -21,8 +22,10 @@ export default function Appointments() {
   const [cancelTarget, setCancelTarget] = useState(null)
   const [canceling, setCanceling] = useState(false)
   const [notice, setNotice] = useState('')
+  const requestVersion = useRef(0)
 
   const loadAppointments = useCallback(async (refresh = false) => {
+    const version = ++requestVersion.current
     if (!isSignedIn) {
       setItems([])
       setLoading(false)
@@ -37,6 +40,7 @@ export default function Appointments() {
         patientApi.getMyAppointments(token),
         patientApi.getMyServiceAppointments(token),
       ])
+      if (version !== requestVersion.current) return
       const failures = []
       const doctorItems = doctorResult.status === 'fulfilled' ? doctorResult.value : (failures.push('doctor appointments'), [])
       const serviceItems = serviceResult.status === 'fulfilled' ? serviceResult.value : (failures.push('service appointments'), [])
@@ -46,17 +50,20 @@ export default function Appointments() {
       ].sort((first, second) => appointmentTimestamp(second) - appointmentTimestamp(first)))
       if (failures.length) setError(`Some information could not be loaded: ${failures.join(' and ')}.`)
     } catch (loadError) {
+      if (version !== requestVersion.current) return
       setError(loadError.message || 'Unable to load your appointments.')
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (version === requestVersion.current) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
-  }, [getToken, isSignedIn])
+  }, [getToken, isSignedIn, userId])
 
   useEffect(() => {
     if (!isLoaded) return undefined
     const timeout = window.setTimeout(() => loadAppointments(), 0)
-    return () => window.clearTimeout(timeout)
+    return () => { window.clearTimeout(timeout); requestVersion.current += 1 }
   }, [isLoaded, loadAppointments])
 
   useEffect(() => {
@@ -73,7 +80,7 @@ export default function Appointments() {
   }), [items, status, type])
 
   const summary = useMemo(() => ({
-    upcoming: items.filter((item) => !['Completed', 'Canceled'].includes(item.status)).length,
+    upcoming: items.filter((item) => !['Completed', 'Canceled'].includes(item.status) && (item.kind === 'Service' || appointmentDateTime(item)?.getTime() >= Date.now())).length,
     completed: items.filter((item) => item.status === 'Completed').length,
     canceled: items.filter((item) => item.status === 'Canceled').length,
   }), [items])
@@ -84,10 +91,12 @@ export default function Appointments() {
     setNotice('')
     try {
       const token = await getToken()
-      if (cancelTarget.kind === 'Service') await patientApi.cancelServiceAppointment(getId(cancelTarget), token)
-      else await patientApi.cancelAppointment(getId(cancelTarget), token)
+      const payload = cancelTarget.kind === 'Service'
+        ? await patientApi.cancelServiceAppointment(getId(cancelTarget), token)
+        : await patientApi.cancelAppointment(getId(cancelTarget), token)
+      const updated = payload.appointment || payload.data || { status: 'Canceled' }
       const canceledId = getId(cancelTarget)
-      setItems((current) => current.map((item) => getId(item) === canceledId && item.kind === cancelTarget.kind ? { ...item, status: 'Canceled' } : item))
+      setItems((current) => current.map((item) => getId(item) === canceledId && item.kind === cancelTarget.kind ? { ...item, ...updated } : item))
       setCancelTarget(null)
       setNotice('Your appointment was canceled successfully.')
     } catch (cancelError) {
@@ -141,7 +150,7 @@ function AppointmentCard({ item, onCancel }) {
     <article className="patient-appointment-card">
       <div className="patient-appointment-card__image"><ImageWithFallback src={appointmentImage(item, service ? 'service' : 'doctor')} alt={name} initials={service ? 'MC' : initials(name)} /><span>{service ? <Stethoscope size={14} /> : <CalendarDays size={14} />}{item.kind}</span></div>
       <div className="patient-appointment-card__main"><div><p>{detail}</p><h2>{name}</h2></div><span className={statusClass(item.status)}><i />{item.status || 'Pending'}</span></div>
-      <div className="patient-appointment-card__details">{service ? <><span><CalendarDays size={16} /><small>Requested</small><strong>{formatRequestDateTime(item.requestedAt || item.createdAt)}</strong></span><span><Clock3 size={16} /><small>Assigned pathologist</small><strong>{item.assignedPathologistName || 'Assignment pending'}</strong></span></> : <><span><CalendarDays size={16} /><small>Date</small><strong>{formatDate(item.date)}</strong></span><span><Clock3 size={16} /><small>Time</small><strong>{formatAppointmentTime(item)}</strong></span></>}<span><span className="appointment-money">৳</span><small>Fee</small><strong>{formatCurrency(item.fees)}</strong></span><span><ShieldCheck size={16} /><small>Payment</small><strong>{item.payment?.method || 'Cash'} · {item.payment?.status || 'Pending'}</strong></span></div>
+      <div className="patient-appointment-card__details">{service ? <><span><CalendarDays size={16} /><small>Requested</small><strong>{formatRequestDateTime(item.requestedAt || item.createdAt)}</strong></span><span><Clock3 size={16} /><small>Assigned pathologist</small><strong>{item.assignedPathologistName || 'Assignment pending'}</strong></span></> : <><span><CalendarDays size={16} /><small>Date</small><strong>{formatDate(item.date)}</strong></span><span><Clock3 size={16} /><small>Time</small><strong>{formatAppointmentTime(item)}</strong></span></>}<span><Banknote size={16} /><small>Fee</small><strong>{formatCurrency(item.fees, paymentCurrency(item))}</strong></span><span><ShieldCheck size={16} /><small>Payment</small><strong>{item.payment?.method || 'Cash'} · {item.payment?.status || 'Pending'}</strong></span></div>
       <div className="patient-appointment-card__footer"><p>{service ? 'Requested' : 'Booked'} {formatCreatedAt(item.requestedAt || item.createdAt)}</p>{!terminal && <button type="button" onClick={onCancel}>Cancel {service ? 'request' : 'appointment'}</button>}</div>
     </article>
   )
@@ -153,13 +162,12 @@ function Summary({ icon: Icon, label, value, tone }) {
 
 function CancelModal({ item, canceling, onClose, onConfirm }) {
   const service = item.kind === 'Service'
-  return <div className="patient-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-title"><button type="button" className="patient-modal__backdrop" onClick={onClose} aria-label="Close" /><div className="patient-modal__panel"><span className="patient-modal__warning"><XCircle size={23} /></span><h2 id="cancel-title">Cancel this {service ? 'service request' : 'appointment'}?</h2><p>{service ? `This will remove your 24/7 service request submitted ${formatRequestDateTime(item.requestedAt || item.createdAt)}.` : `This will cancel your doctor booking on ${formatDate(item.date)} at ${formatAppointmentTime(item)}.`}</p><div><button type="button" onClick={onClose} disabled={canceling}>Keep {service ? 'request' : 'appointment'}</button><button type="button" onClick={onConfirm} disabled={canceling}>{canceling && <LoaderCircle size={16} className="animate-spin" />}{canceling ? 'Canceling...' : 'Yes, cancel'}</button></div></div></div>
+  return <DialogPortal onClose={onClose} busy={canceling} label="Cancel booking"><div className="patient-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-title"><button data-dialog-close="" disabled={canceling} data-dialog-backdrop="" tabIndex={-1} type="button" className="patient-modal__backdrop" onClick={onClose} aria-label="Close" /><div data-dialog-panel="" className="patient-modal__panel"><span className="patient-modal__warning"><XCircle size={23} /></span><h2 id="cancel-title">Cancel this {service ? 'service request' : 'appointment'}?</h2><p>{service ? `This will remove your 24/7 service request submitted ${formatRequestDateTime(item.requestedAt || item.createdAt)}.` : `This will cancel your doctor booking on ${formatDate(item.date)} at ${formatAppointmentTime(item)}.`}</p><div><button data-dialog-close="" type="button" onClick={onClose} disabled={canceling}>Keep {service ? 'request' : 'appointment'}</button><button type="button" onClick={onConfirm} disabled={canceling}>{canceling && <LoaderCircle size={16} className="animate-spin" />}{canceling ? 'Canceling...' : 'Yes, cancel'}</button></div></div></div></DialogPortal>
 }
 
 function appointmentTimestamp(item) {
   if (item.kind === 'Service') return new Date(item.requestedAt || item.createdAt || 0).getTime()
-  const date = new Date(`${item.date || '1970-01-01'}T00:00:00`)
-  return Number.isNaN(date.getTime()) ? new Date(item.createdAt || 0).getTime() : date.getTime()
+  return appointmentDateTime(item)?.getTime() ?? new Date(item.createdAt || 0).getTime()
 }
 
 function formatRequestDateTime(value) {

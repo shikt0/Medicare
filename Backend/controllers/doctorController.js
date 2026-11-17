@@ -2,6 +2,9 @@ import Doctor from "../models/Doctor.js";
 import Appointment from "../models/Appointment.js";
 import { uploadToCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 import { normalizeWeeklySchedule } from "../utils/weeklySchedule.js";
+import { escapeRegExp, isObjectId } from "../utils/validation.js";
+import { getPaymentCurrency, paidAppointmentTotalsExpression } from "../utils/paymentCurrency.js";
+import validator from 'validator';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
@@ -21,6 +24,7 @@ function normalizeDocForClient(raw = {}) {
   doc.patients = doc.patients ?? "";
   doc.rating = doc.rating ?? 0;
   doc.fee = doc.fee ?? doc.fees ?? 0;
+  doc.currency = getPaymentCurrency();
 
   return doc;
 }
@@ -32,14 +36,20 @@ export async function createDoctor(req,res) {
 
     try{
         const body= req.body || {};
-        if(!body.email || !body.password ||!body.name){
+        if(typeof body.email !== 'string' || !body.email.trim() || !body.password || !String(body.name || '').trim()){
             return res.status(400).json({
                 success: false,
                 message: "name, email and password are required"
             })
         }
 
-        const emailLC= (body.email || "").toLowerCase();
+        const secret = process.env.JWT_SECRET;
+        if (!secret) return res.status(503).json({ success: false, message: "Doctor accounts are temporarily unavailable" });
+        const emailLC = body.email.trim().toLowerCase();
+        if (!validator.isEmail(emailLC)) return res.status(400).json({ success: false, message: "Enter a valid email address" });
+        if (body.fee !== undefined && (!Number.isFinite(Number(body.fee)) || Number(body.fee) < 0)) {
+          return res.status(400).json({ success: false, message: "Fee must be a nonnegative number" });
+        }
         if(await Doctor.findOne({email:emailLC})){
             return res.status(409).json({
                 success:false,
@@ -79,15 +89,6 @@ export async function createDoctor(req,res) {
 
 
     await doc.save();
-    const secret =process.env.JWT_SECRET;
-
-    if(!secret){
-        console.warn("JWT secret is not define");
-        return res.status(500).json({
-            success: false,
-            message: "Server misconfigured"
-        });
-    }
 
 
 
@@ -130,7 +131,7 @@ export const getDoctors = async (req, res) => {
 
     const match = {};
     if (q && typeof q === "string" && q.trim()) {
-      const re = new RegExp(q.trim(), "i");
+      const re = new RegExp(escapeRegExp(q.trim()), "i");
       match.$or = [{ name: re }, { specialization: re }, { speciality: re }, { email: re }];
     }
 
@@ -146,10 +147,11 @@ export const getDoctors = async (req, res) => {
       },
       {
         $addFields: {
+          earningsByCurrency: paidAppointmentTotalsExpression(),
           appointmentsTotal: { $size: "$appointments" },
           appointmentsCompleted: {
             $size: {
-              $filter: { input: "$appointments", as: "a", cond: { $in: ["$$a.status", ["Confirmed", "Completed"]] } }
+              $filter: { input: "$appointments", as: "a", cond: { $eq: ["$$a.status", "Completed"] } }
             }
           },
           appointmentsCanceled: {
@@ -161,7 +163,7 @@ export const getDoctors = async (req, res) => {
             $sum: {
               $map: {
                 input: {
-                  $filter: { input: "$appointments", as: "a", cond: { $in: ["$$a.status", ["Confirmed", "Completed"]] } }
+                  $filter: { input: "$appointments", as: "a", cond: { $and: [{ $eq: ["$$a.status", "Completed"] }, { $eq: ["$$a.payment.status", "Paid"] }] } }
                 },
                 as: "p",
                 in: { $ifNull: ["$$p.fees", 0] }
@@ -182,6 +184,7 @@ export const getDoctors = async (req, res) => {
       name: d.name || "",
       specialization: d.specialization || d.speciality || "",
       fee: d.fee ?? d.fees ?? d.consultationFee ?? 0,
+      currency: getPaymentCurrency(),
       imageUrl: d.imageUrl || d.image || d.avatar || null,
       availability: d.availability ?? "Available",
       schedule: normalizeWeeklySchedule(d.schedule),
@@ -198,6 +201,7 @@ export const getDoctors = async (req, res) => {
         appointmentsCompleted: d.appointmentsCompleted || 0,
         appointmentsCanceled: d.appointmentsCanceled || 0,
         earnings: d.earnings || 0,
+        earningsByCurrency: d.earningsByCurrency || { bdt: 0, inr: 0 },
       } : {}),
     }));
 
@@ -216,6 +220,7 @@ export async function getDoctorById(req,res) {
 
     try {
         const{id}=req.params;
+        if (!isObjectId(id)) return res.status(400).json({ success: false, message: "Invalid doctor ID" });
         const doc= await Doctor.findById(id).select("-password -email").lean();
         if(!doc)
             return res.status(404).json({
@@ -249,7 +254,14 @@ export async function getDoctorById(req,res) {
 export async function updateDoctor(req, res) {
   try {
     const { id } = req.params;
+    if (!isObjectId(id)) return res.status(400).json({ success: false, message: "Invalid doctor ID" });
     const body = req.body || {};
+    if (body.fee !== undefined && (!Number.isFinite(Number(body.fee)) || Number(body.fee) < 0)) {
+      return res.status(400).json({ success: false, message: "Fee must be a nonnegative number" });
+    }
+    if (body.email !== undefined && (typeof body.email !== 'string' || !validator.isEmail(body.email.trim()))) {
+      return res.status(400).json({ success: false, message: "Enter a valid email address" });
+    }
 
     const isAdmin = req.actor?.role === 'admin'
     const isOwnerDoctor = req.actor?.role === 'doctor'
@@ -281,9 +293,9 @@ export async function updateDoctor(req, res) {
     updatable.forEach((k) => { if (body[k] !== undefined) existing[k] = body[k]; });
 
     if (body.email && body.email !== existing.email) {
-      const other = await Doctor.findOne({ email: body.email.toLowerCase() });
+      const other = await Doctor.findOne({ email: body.email.trim().toLowerCase() });
       if (other && other._id.toString() !== id) return res.status(409).json({ success: false, message: "Email already in use" });
-      existing.email = body.email.toLowerCase();
+      existing.email = body.email.trim().toLowerCase();
     }
 
     if (body.password) existing.password = await bcrypt.hash(String(body.password), 12);
@@ -305,6 +317,7 @@ export async function deleteDoctor(req,res) {
     try {
         
         const {id}=req.params;
+        if (!isObjectId(id)) return res.status(400).json({ success: false, message: "Invalid doctor ID" });
         const existing =await Doctor.findById(id);
         if(!existing) return res.status(404).json({
             success:false,
@@ -381,7 +394,7 @@ export async function doctorLogin(req, res) {
     try {
         const { email, password } = req.body || {};
 
-        if (!email?.trim() || !password) return res.status(400).json({
+        if (typeof email !== 'string' || !email.trim() || !password) return res.status(400).json({
             success: false,
             message: "Email and password are required"
         });

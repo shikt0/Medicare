@@ -83,6 +83,14 @@ const serviceAppointmentSchema = new mongoose.Schema({
       default: "",
     },
 
+  time: { type: String, default: "" },
+  rescheduledTo: {
+    date: { type: String },
+    hour: { type: Number },
+    minute: { type: Number },
+    ampm: { type: String, enum: ["AM", "PM", ""] },
+  },
+
   hour: {
     type: Number,
       default: null,
@@ -114,6 +122,8 @@ const serviceAppointmentSchema = new mongoose.Schema({
   },
 
   payment: {
+    // Keep old checkout sessions in their original currency when configuration changes.
+    currency: { type: String, enum: ["bdt", "inr"] },
     method: {
       type: String,
         enum: ["Cash", "Online"],

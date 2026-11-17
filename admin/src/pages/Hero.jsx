@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   CalendarDays,
@@ -15,6 +15,10 @@ import { api } from '../lib/api'
 import {
   doctorNameFromAppointment,
   formatCurrency,
+  bookingCurrency,
+  formatRevenue,
+  DEFAULT_CURRENCY,
+  revenueAmount,
   formatDate,
   getId,
   serviceNameFromAppointment,
@@ -43,6 +47,7 @@ const initialDashboard = {
 }
 
 export default function Hero() {
+  const requestVersion = useRef(0)
   const [dashboard, setDashboard] = useState(initialDashboard)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -54,6 +59,7 @@ export default function Hero() {
   const [activityFilter, setActivityFilter] = useState('All')
 
   const loadDashboard = useCallback(async (isRefresh = false) => {
+    const version = ++requestVersion.current
     if (isRefresh) setRefreshing(true)
     else setLoading(true)
     setError('')
@@ -70,6 +76,7 @@ export default function Hero() {
 
     try {
       const results = await Promise.allSettled(sources.map(([, , promise]) => promise))
+      if (version !== requestVersion.current) return
       const failedLabels = results
         .map((result, index) => result.status === 'rejected' ? sources[index][1] : null)
         .filter(Boolean)
@@ -112,16 +119,15 @@ export default function Hero() {
         setError(`Some dashboard data could not be loaded: ${failedLabels.join(', ')}.`)
       }
     } catch (loadError) {
-      setError(loadError.message || 'Unable to load the dashboard.')
+      if (version === requestVersion.current) setError(loadError.message || 'Unable to load the dashboard.')
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (version === requestVersion.current) { setLoading(false); setRefreshing(false) }
     }
   }, [])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => loadDashboard(), 0)
-    return () => window.clearTimeout(timeout)
+    return () => { window.clearTimeout(timeout); requestVersion.current += 1 }
   }, [loadDashboard])
 
   const summary = useMemo(() => buildSummary(dashboard), [dashboard])
@@ -137,7 +143,7 @@ export default function Hero() {
 
     return [...filtered].sort((first, second) => {
       if (doctorSort === 'name') return doctorName(first).localeCompare(doctorName(second))
-      if (doctorSort === 'earnings') return doctorEarnings(second) - doctorEarnings(first)
+      if (doctorSort === 'earnings') return revenueAmount(second.earningsByCurrency) - revenueAmount(first.earningsByCurrency)
       return doctorAppointmentCount(second) - doctorAppointmentCount(first)
     })
   }, [dashboard.doctors, doctorSearch, doctorSort])
@@ -187,7 +193,8 @@ export default function Hero() {
             <button
               type="button"
               onClick={() => loadDashboard(true)}
-              className="shrink-0 font-bold text-amber-950 underline decoration-amber-400 underline-offset-4"
+              disabled={refreshing}
+              className="disabled:cursor-wait disabled:opacity-60 shrink-0 font-bold text-amber-950 underline decoration-amber-400 underline-offset-4"
             >
               Try again
             </button>
@@ -219,14 +226,14 @@ export default function Hero() {
           <SummaryCard
             icon={Stethoscope}
             label="Doctor-visit revenue"
-            value={formatCurrency(summary.doctorRevenue)}
+            value={formatRevenue(summary.doctorRevenue, dashboard.appointmentStats.revenueByCurrency)}
             detail="Completed doctor visits marked paid"
             color="amber"
           />
           <SummaryCard
             icon={WalletCards}
             label="Service revenue"
-            value={formatCurrency(summary.serviceRevenue)}
+            value={formatRevenue(summary.serviceRevenue, dashboard.serviceSummary.earningsByCurrency)}
             detail="Completed services marked paid"
             color="emerald"
           />
@@ -300,8 +307,8 @@ export default function Hero() {
 
 function DoctorPerformance({ doctors, displayedDoctors, search, setSearch, sort, setSort, showAll, setShowAll }) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-5 lg:flex-row lg:items-center lg:justify-between">
+    <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-5 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h2 className="text-lg font-bold text-slate-900">Doctor performance</h2>
           <p className="mt-1 text-sm text-slate-500">Booking volume and earnings by provider.</p>
@@ -317,7 +324,7 @@ function DoctorPerformance({ doctors, displayedDoctors, search, setSearch, sort,
                 setShowAll(false)
               }}
               placeholder="Search doctors"
-              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-50 sm:w-64"
+              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-50 sm:w-56"
             />
           </label>
           <label>
@@ -328,7 +335,7 @@ function DoctorPerformance({ doctors, displayedDoctors, search, setSearch, sort,
               className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50 sm:w-auto"
             >
               <option value="appointments">Most appointments</option>
-              <option value="earnings">Highest earnings</option>
+              <option value="earnings">Highest {DEFAULT_CURRENCY} earnings</option>
               <option value="name">Name A–Z</option>
             </select>
           </label>
@@ -375,7 +382,7 @@ function DoctorPerformance({ doctors, displayedDoctors, search, setSearch, sort,
                     </td>
                     <td className="px-5 py-4 text-center font-semibold text-slate-700">{doctorAppointmentCount(doctor)}</td>
                     <td className="px-5 py-4 text-center font-semibold text-emerald-700">{doctorCompletedCount(doctor)}</td>
-                    <td className="px-5 py-4 text-right font-bold text-slate-900">{formatCurrency(doctorEarnings(doctor))}</td>
+                    <td className="px-5 py-4 text-right font-bold text-slate-900">{formatRevenue(doctorEarnings(doctor), doctor.earningsByCurrency)}</td>
                   </tr>
                 )
               })}
@@ -401,7 +408,7 @@ function DoctorPerformance({ doctors, displayedDoctors, search, setSearch, sort,
 
 function RecentAppointments({ appointments, filter, setFilter }) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-bold text-slate-900">Recent appointments</h2>
@@ -438,7 +445,7 @@ function RecentAppointments({ appointments, filter, setFilter }) {
 
 function ServicePerformance({ services }) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 px-5 py-5">
         <h2 className="text-lg font-bold text-slate-900">Service performance</h2>
         <p className="mt-1 text-sm text-slate-500">Top services by appointment volume.</p>
@@ -458,7 +465,7 @@ function ServicePerformance({ services }) {
                 </div>
                 <div className="mt-1.5 flex items-center justify-between gap-3 text-xs text-slate-500">
                   <span>Open 24/7</span>
-                  <span>{formatCurrency(service.earning || 0)}</span>
+                  <span>{formatRevenue(service.earning || 0, service.earningsByCurrency)}</span>
                 </div>
               </div>
             </div>
@@ -523,11 +530,11 @@ function SummaryCard({ icon: CardIcon, label, value, detail, color }) {
   }
 
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <article className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <p className="text-sm font-semibold text-slate-500">{label}</p>
-          <p className="mt-2 text-2xl font-bold tracking-tight text-slate-950">{value}</p>
+          <p className="mt-2 break-words text-2xl font-bold tracking-tight text-slate-950">{value}</p>
           <p className="mt-1 text-xs text-slate-400">{detail}</p>
         </div>
         <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ring-1 ${tones[color]}`}>
@@ -568,7 +575,7 @@ function AppointmentRow({ appointment }) {
   const isDoctor = appointment.kind === 'Doctor'
   const name = appointment.patientName || appointment.patient?.name || 'Unknown patient'
   const provider = isDoctor ? doctorNameFromAppointment(appointment) : serviceNameFromAppointment(appointment)
-  const requestTime = new Date(appointment.requestedAt || appointment.createdAt || 0)
+  const requestTime = new Date(appointment.requestedAt || appointment.createdAt || '')
   const serviceRequestedAt = Number.isNaN(requestTime.getTime()) ? 'Recently' : requestTime.toLocaleString('en-BD', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
   return (
@@ -581,14 +588,14 @@ function AppointmentRow({ appointment }) {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="truncate text-sm font-bold text-slate-900">{name}</p>
-              <p className="mt-0.5 truncate text-xs text-slate-500">{isDoctor ? 'Dr. ' : ''}{provider}</p>
+              <p className="mt-0.5 truncate text-xs text-slate-500">{provider}</p>
             </div>
             <StatusBadge value={normalizeStatus(appointment.status)} />
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
             <span>{isDoctor ? formatDate(appointment.date) : serviceRequestedAt}</span>
             <span>{isDoctor ? appointment.time || '-' : appointment.assignedPathologistName || 'Assignment pending'}</span>
-            <span className="font-bold text-slate-700">{formatCurrency(appointmentFee(appointment))}</span>
+            <span className="font-bold text-slate-700">{formatCurrency(appointmentFee(appointment), bookingCurrency(appointment))}</span>
             <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold">{appointment.kind}</span>
           </div>
         </div>
@@ -598,8 +605,9 @@ function AppointmentRow({ appointment }) {
 }
 
 function DoctorAvatar({ doctor }) {
+  const [failedImage, setFailedImage] = useState(null)
   const image = doctor.imageUrl || doctor.image || doctor.avatar
-  if (image) return <img src={image} alt="" className="h-11 w-11 rounded-xl object-cover ring-1 ring-slate-200" />
+  if (image && failedImage !== image) return <img onError={() => setFailedImage(image)} src={image} alt="" className="h-11 w-11 rounded-xl object-cover ring-1 ring-slate-200" />
   return (
     <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
       <Stethoscope size={19} />
@@ -608,8 +616,9 @@ function DoctorAvatar({ doctor }) {
 }
 
 function ServiceAvatar({ service }) {
+  const [failedImage, setFailedImage] = useState(null)
   const image = service.imageUrl || service.image || service.imageSmall
-  if (image) return <img src={image} alt="" className="h-11 w-11 rounded-xl object-cover ring-1 ring-slate-200" />
+  if (image && failedImage !== image) return <img onError={() => setFailedImage(image)} src={image} alt="" className="h-11 w-11 rounded-xl object-cover ring-1 ring-slate-200" />
   return (
     <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-700">
       <Activity size={19} />

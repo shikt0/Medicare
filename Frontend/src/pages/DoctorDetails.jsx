@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth, useClerk, useUser } from '@clerk/react'
 import { ArrowLeft, Award, CalendarDays, CheckCircle2, Clock3, GraduationCap, LoaderCircle, MapPin, ShieldCheck, Star, Stethoscope, WalletCards } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
@@ -7,6 +7,7 @@ import Navbar from '../components/Navbar'
 import { ErrorState, ImageWithFallback, LoadingPanel } from '../components/PatientUi'
 import { patientApi } from '../lib/api'
 import { cleanSchedule, formatCurrency, formatDate, getId, isAvailable } from '../lib/format'
+import { patientDetailsError } from '../lib/validation'
 
 const emptyForm = { patientName: '', mobile: '', age: '', gender: '', notes: '', paymentMethod: 'Cash' }
 
@@ -24,22 +25,31 @@ export default function DoctorDetails() {
   const [formError, setFormError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [success, setSuccess] = useState('')
+  const requestVersion = useRef(0)
 
   const loadDoctor = useCallback(async () => {
+    const version = ++requestVersion.current
     setLoading(true)
     setError('')
     try {
-      setDoctor(await patientApi.getDoctor(id))
+      const profile = await patientApi.getDoctor(id)
+      if (version !== requestVersion.current) return
+      if (!profile) throw new Error('This doctor profile is no longer available.')
+      setDoctor(profile)
+      setSelectedDate('')
+      setSelectedTime('')
+      setSuccess('')
     } catch (loadError) {
+      if (version !== requestVersion.current) return
       setError(loadError.message || 'Unable to load this doctor.')
     } finally {
-      setLoading(false)
+      if (version === requestVersion.current) setLoading(false)
     }
   }, [id])
 
   useEffect(() => {
     const timeout = window.setTimeout(loadDoctor, 0)
-    return () => window.clearTimeout(timeout)
+    return () => { window.clearTimeout(timeout); requestVersion.current += 1 }
   }, [loadDoctor])
 
   useEffect(() => {
@@ -69,17 +79,20 @@ export default function DoctorDetails() {
 
   async function bookAppointment(event) {
     event.preventDefault()
+    if (submitting) return
     setSuccess('')
     if (!isSignedIn) {
       await clerk.openSignIn()
       return
     }
-    if (!selectedDate || !selectedTime) {
+    const currentSlots = cleanSchedule(doctor?.schedule, { bookedSlots: doctor?.bookedSlots })
+    if (!available || !currentSlots.some((day) => day.date === selectedDate && day.slots.includes(selectedTime))) {
       setFormError('Choose an available date and time before booking.')
       return
     }
-    if (!form.patientName.trim() || !form.mobile.trim()) {
-      setFormError('Enter the patient name and mobile number.')
+    const validationError = patientDetailsError(form)
+    if (validationError) {
+      setFormError(validationError)
       return
     }
 
@@ -87,11 +100,12 @@ export default function DoctorDetails() {
     setFormError('')
     try {
       const token = await getToken()
+      if (!token) throw new Error('Your session has expired. Sign in again to book.')
       const payload = await patientApi.createAppointment({
         doctorId: getId(doctor),
         patientName: form.patientName.trim(),
         mobile: form.mobile.trim(),
-        age: form.age || undefined,
+        age: form.age === '' ? undefined : Number(form.age),
         gender: form.gender,
         notes: form.notes.trim(),
         date: selectedDate,
@@ -117,6 +131,10 @@ export default function DoctorDetails() {
       setSelectedTime('')
     } catch (bookingError) {
       setFormError(bookingError.message || 'Unable to book this appointment.')
+      if (bookingError.status === 409) {
+        setSelectedTime('')
+        try { setDoctor(await patientApi.getDoctor(id)) } catch { /* Preserve the booking error if refreshing fails. */ }
+      }
     } finally {
       setSubmitting(false)
     }
@@ -154,11 +172,11 @@ export default function DoctorDetails() {
 
               <div className="booking-layout">
                 <section className="booking-schedule-panel">
-                  <div className="booking-section-heading"><span><CalendarDays size={20} /></span><div><h2>Choose an appointment</h2><p>Select a date generated from the doctor’s weekly schedule.</p></div></div>
+                  <div className="booking-section-heading"><span><CalendarDays size={20} /></span><div><h2>Choose an appointment</h2><p>Choose a day, then pick a time that works for you.</p></div></div>
                   {!available ? <ScheduleMessage title="Bookings are paused" text="This doctor is currently unavailable. You can still review the profile or choose another doctor." /> : schedule.length === 0 ? <ScheduleMessage title="No upcoming slots" text="The doctor has not published any weekly appointment times yet. Please check again later." /> : (
                     <>
-                      <div className="booking-date-grid">{schedule.map((day) => <button key={day.date} type="button" onClick={() => selectDate(day.date)} className={selectedDate === day.date ? 'is-selected' : ''}><small>{formatDate(day.date, { short: true })}</small><strong>{day.slots.length} slots</strong></button>)}</div>
-                      {selectedDate && <div className="booking-time-section"><p><Clock3 size={15} /> Available times for {formatDate(selectedDate)}</p><div>{selectedSlots.map((slot) => <button key={slot} type="button" onClick={() => { setSelectedTime(slot); setFormError('') }} className={selectedTime === slot ? 'is-selected' : ''}>{slot}</button>)}</div></div>}
+                      <div className="booking-date-grid" aria-label="Available appointment dates">{schedule.map((day) => <button key={day.date} type="button" onClick={() => selectDate(day.date)} aria-pressed={selectedDate === day.date} className={selectedDate === day.date ? 'is-selected' : ''}><small>{formatDate(day.date, { short: true })}</small><strong>{day.slots.length} {day.slots.length === 1 ? 'slot' : 'slots'}</strong></button>)}</div>
+                      {selectedDate && <div className="booking-time-section"><p><Clock3 size={15} /> Available times for {formatDate(selectedDate)}</p><div>{selectedSlots.map((slot) => <button key={slot} type="button" onClick={() => { setSelectedTime(slot); setFormError('') }} aria-pressed={selectedTime === slot} className={selectedTime === slot ? 'is-selected' : ''}>{slot}</button>)}</div></div>}
                     </>
                   )}
                 </section>
@@ -168,7 +186,7 @@ export default function DoctorDetails() {
                   {!isSignedIn && <div className="patient-signin-notice"><ShieldCheck size={17} /><p>Sign in securely to complete your booking.</p><button type="button" onClick={() => clerk.openSignIn()}>Sign in</button></div>}
                   <div className="patient-form-grid">
                     <Field label="Patient name" name="patientName" value={form.patientName} onChange={updateForm} placeholder="Full name" required />
-                    <Field label="Mobile number" name="mobile" value={form.mobile} onChange={updateForm} placeholder="01XXXXXXXXX" required />
+                    <Field label="Mobile number" name="mobile" type="tel" autoComplete="tel" value={form.mobile} onChange={updateForm} placeholder="01XXXXXXXXX" required />
                     <Field label="Age" name="age" type="number" min="0" max="120" value={form.age} onChange={updateForm} placeholder="Age" />
                     <label className="patient-field"><span>Gender</span><select name="gender" value={form.gender} onChange={updateForm}><option value="">Prefer not to say</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option></select></label>
                   </div>

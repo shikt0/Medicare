@@ -1,3 +1,4 @@
+import DialogPortal from '../components/DialogPortal'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity, ArrowRight, Banknote, Bell, CalendarCheck, CalendarDays, Check, CheckCircle2,
@@ -10,7 +11,7 @@ import logo from '../assets/logo.png'
 import { ErrorState, ImageWithFallback, LoadingPanel } from '../components/PatientUi'
 import { patientApi } from '../lib/api'
 import { clearDoctorSession, readDoctorSession, saveDoctorSession } from '../lib/doctorSession'
-import { formatAppointmentTime, formatCurrency, formatDate, getId, isAvailable, localDateKey, normalizeWeeklySchedule, statusClass, WEEK_DAYS } from '../lib/format'
+import { appointmentDateTime, formatAppointmentTime, formatCurrency, formatDate, getId, isAvailable, localDateKey, normalizeWeeklySchedule, paymentCurrency, statusClass, WEEK_DAYS } from '../lib/format'
 import '../doctorPortal.css'
 
 const navItems = [
@@ -37,6 +38,9 @@ export default function DoctorPortal() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [cashPrompt, setCashPrompt] = useState(null)
   const [cashPromptBusy, setCashPromptBusy] = useState(false)
+  const [availabilityBusy, setAvailabilityBusy] = useState(false)
+  const availabilityLock = useRef(false)
+  const appointmentLock = useRef(false)
   const [scheduleDraft, setScheduleDraft] = useState(() => normalizeWeeklySchedule(session?.doctor?.schedule))
   const [profileDraft, setProfileDraft] = useState(() => profileFromDoctor(session?.doctor))
 
@@ -98,11 +102,18 @@ export default function DoctorPortal() {
   }
 
   async function toggleAvailability() {
+    if (!doctor || availabilityLock.current) return
+    availabilityLock.current = true
+    setAvailabilityBusy(true)
     try {
-      syncDoctor(await patientApi.toggleDoctorAvailability(getId(doctor), session.token))
-      setNotice({ tone: 'success', text: `You are now ${isAvailable(doctor) ? 'unavailable' : 'available'} for new bookings.` })
+      const updated = await patientApi.toggleDoctorAvailability(getId(doctor), session.token)
+      syncDoctor(updated)
+      setNotice({ tone: 'success', text: `You are now ${isAvailable(updated) ? 'available' : 'unavailable'} for new bookings.` })
     } catch (updateError) {
       setNotice({ tone: 'error', text: updateError.message || 'Unable to update availability.' })
+    } finally {
+      availabilityLock.current = false
+      setAvailabilityBusy(false)
     }
   }
 
@@ -113,14 +124,20 @@ export default function DoctorPortal() {
     return updated
   }
 
-  function updateAppointment(id, changes, successMessage) {
-    const appointment = appointments.find((item) => String(getId(item)) === String(id))
-    if (changes?.status === 'Completed' && requiresCashPaymentDecision(appointment) && typeof changes.cashPaymentReceived !== 'boolean') {
-      return new Promise((resolve, reject) => {
-        setCashPrompt({ appointment, changes, successMessage, resolve, reject })
-      })
+  async function updateAppointment(id, changes, successMessage) {
+    if (appointmentLock.current) throw new Error('Finish the current appointment update before starting another.')
+    appointmentLock.current = true
+    try {
+      const appointment = appointments.find((item) => String(getId(item)) === String(id))
+      if (changes?.status === 'Completed' && requiresCashPaymentDecision(appointment) && typeof changes.cashPaymentReceived !== 'boolean') {
+        return await new Promise((resolve, reject) => {
+          setCashPrompt({ appointment, changes, successMessage, resolve, reject })
+        })
+      }
+      return await saveAppointmentUpdate(id, changes, successMessage)
+    } finally {
+      appointmentLock.current = false
     }
-    return saveAppointmentUpdate(id, changes, successMessage)
   }
 
   function closeCashPrompt() {
@@ -193,7 +210,7 @@ export default function DoctorPortal() {
       <div className="doctor-workspace__main">
         <header className="doctor-topbar">
           <div><button type="button" className="doctor-menu-button" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Menu size={20} /></button><div><span>Doctor portal</span><strong>{pageTitle}</strong></div></div>
-          <div className="doctor-topbar__actions"><button type="button" onClick={() => loadWorkspace(true)} disabled={refreshing} aria-label="Refresh workspace"><RefreshCw size={17} className={refreshing ? 'animate-spin' : ''} /></button><span><Bell size={18} /><i>{appointments.filter((item) => item.status === 'Pending').length}</i></span><button type="button" onClick={toggleAvailability} className={isAvailable(doctor) ? 'doctor-availability doctor-availability--online' : 'doctor-availability'}><i />{isAvailable(doctor) ? 'Available' : 'Unavailable'}</button></div>
+          <div className="doctor-topbar__actions"><button type="button" onClick={() => loadWorkspace(true)} disabled={refreshing} aria-label="Refresh workspace"><RefreshCw size={17} className={refreshing ? 'animate-spin' : ''} /></button><span><Bell size={18} /><i>{appointments.filter((item) => item.status === 'Pending').length}</i></span><button type="button" onClick={toggleAvailability} disabled={availabilityBusy || loading || !doctor} className={isAvailable(doctor) ? 'doctor-availability doctor-availability--online' : 'doctor-availability'}><i />{isAvailable(doctor) ? 'Available' : 'Unavailable'}</button></div>
         </header>
 
         <main className="doctor-workspace__content">
@@ -204,7 +221,7 @@ export default function DoctorPortal() {
           ) : section === 'laboratory' ? (
             <LaboratoryView appointments={appointments} tests={labTests} onOrder={orderLabTest} />
           ) : section === 'schedule' ? (
-            <ScheduleView doctor={doctor} draft={scheduleDraft} setDraft={setScheduleDraft} onSave={saveSchedule} onToggleAvailability={toggleAvailability} />
+            <ScheduleView doctor={doctor} draft={scheduleDraft} setDraft={setScheduleDraft} onSave={saveSchedule} onToggleAvailability={toggleAvailability} availabilityBusy={availabilityBusy} />
           ) : section === 'profile' ? (
             <ProfileView doctor={doctor} draft={profileDraft} setDraft={setProfileDraft} onSave={saveProfile} />
           ) : (
@@ -228,9 +245,14 @@ export default function DoctorPortal() {
 function OverviewView({ doctor, appointments, onUpdate }) {
   const today = localDateKey(new Date())
   const todaysAppointments = appointments.filter((item) => item.date === today && item.status !== 'Canceled')
-  const upcoming = appointments.filter((item) => item.date >= today && !['Completed', 'Canceled'].includes(item.status))
+  const upcoming = appointments.filter((item) => appointmentDateTime(item)?.getTime() >= Date.now() && !['Completed', 'Canceled'].includes(item.status))
   const completed = appointments.filter((item) => item.status === 'Completed')
-  const paidTotal = appointments.filter((item) => item.status === 'Completed' && item.payment?.status === 'Paid').reduce((total, item) => total + Number(item.fees || 0), 0)
+  const paidTotals = appointments.filter((item) => item.status === 'Completed' && item.payment?.status === 'Paid').reduce((totals, item) => {
+    const currency = paymentCurrency(item)
+    totals[currency] = (totals[currency] || 0) + Number(item.fees || 0)
+    return totals
+  }, {})
+  const revenue = Object.entries(paidTotals).map(([currency, amount]) => formatCurrency(amount, currency)).join(' / ') || formatCurrency(0)
   const nextAppointment = [...upcoming].sort(sortAppointments)[0]
   const firstName = String(doctor?.name || 'Doctor').replace(/^Dr\.?\s*/i, '').split(' ')[0]
 
@@ -244,7 +266,7 @@ function OverviewView({ doctor, appointments, onUpdate }) {
       <StatCard icon={CalendarCheck} label="Today" value={todaysAppointments.length} detail="Scheduled visits" tone="green" />
       <StatCard icon={Clock3} label="Upcoming" value={upcoming.length} detail="Active appointments" tone="blue" />
       <StatCard icon={UsersRound} label="Completed" value={completed.length} detail="Patient consultations" tone="violet" />
-      <StatCard icon={Banknote} label="Visit revenue" value={formatCurrency(paidTotal)} detail="Completed and paid" tone="amber" compact />
+      <StatCard icon={Banknote} label="Visit revenue" value={revenue} detail="Completed and paid" tone="amber" compact />
     </section>
 
     <div className="doctor-overview-grid">
@@ -282,7 +304,7 @@ function AppointmentsView({ appointments, onUpdate }) {
 
   return <section className="doctor-view">
     <ViewHeading kicker="Patient care" title="Appointments" text="Review patient details, confirm visits, record notes, and keep every appointment current." />
-    <div className="doctor-appointment-tools"><label><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patient or mobile number" />{query && <button type="button" onClick={() => setQuery('')}><X size={15} /></button>}</label><div>{statuses.map((value) => <button type="button" key={value} onClick={() => setStatus(value)} className={status === value ? 'is-active' : ''}>{value}</button>)}</div></div>
+    <div className="doctor-appointment-tools"><label><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patient or mobile number" />{query && <button type="button" onClick={() => setQuery('')} aria-label="Clear patient search"><X size={15} /></button>}</label><div>{statuses.map((value) => <button type="button" key={value} onClick={() => setStatus(value)} className={status === value ? 'is-active' : ''}>{value}</button>)}</div></div>
     <div className="doctor-results-row"><span>{filtered.length} {filtered.length === 1 ? 'appointment' : 'appointments'}</span>{(query || status !== 'All') && <button type="button" onClick={() => { setQuery(''); setStatus('All') }}>Clear filters</button>}</div>
     {localError && <p className="doctor-inline-error"><XCircle size={16} />{localError}</p>}
     {filtered.length ? <div className="doctor-appointment-list">{filtered.map((item) => <DoctorAppointmentCard key={getId(item)} item={item} working={workingId === getId(item)} onUpdate={quickUpdate} onOpen={() => setSelected(item)} />)}</div> : <CompactEmpty icon={ClipboardList} title="No appointments found" text="Try changing the search or status filter." />}
@@ -296,7 +318,7 @@ function DoctorAppointmentCard({ item, working, onUpdate, onOpen }) {
     <div className="doctor-patient-avatar">{initials(item.patientName)}</div>
     <div className="doctor-appointment-row__patient"><span>Patient</span><h2>{item.patientName}</h2><p><Phone size={13} />{item.mobile}<i />{item.age ? `${item.age} yrs` : 'Age —'}{item.gender && ` · ${item.gender}`}</p></div>
     <div className="doctor-appointment-row__when"><span><CalendarDays size={15} />{formatDate(item.date)}</span><span><Clock3 size={15} />{formatAppointmentTime(item)}</span></div>
-    <div className="doctor-appointment-row__payment"><span className={statusClass(item.status)}><i />{item.status}</span><small>{item.payment?.method || 'Cash'} · {item.payment?.status || 'Pending'} · {formatCurrency(item.fees)}</small></div>
+    <div className="doctor-appointment-row__payment"><span className={statusClass(item.status)}><i />{item.status}</span><small>{item.payment?.method || 'Cash'} · {item.payment?.status || 'Pending'} · {formatCurrency(item.fees, paymentCurrency(item))}</small></div>
     <div className="doctor-appointment-row__actions">{item.status === 'Pending' && <button type="button" onClick={() => onUpdate(item, 'Confirmed')} disabled={working}>{working ? <LoaderCircle size={15} className="animate-spin" /> : <Check size={15} />} Confirm</button>}{['Confirmed', 'Rescheduled'].includes(item.status) && <button type="button" onClick={() => onUpdate(item, 'Completed')} disabled={working}>{working ? <LoaderCircle size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} Complete</button>}<button type="button" onClick={onOpen} className="doctor-manage-button">Manage <ChevronRight size={15} /></button>{terminal && <span>Record closed</span>}</div>
   </article>
 }
@@ -309,13 +331,14 @@ function AppointmentManager({ item, onClose, onUpdate }) {
   const [error, setError] = useState('')
   const terminal = ['Completed', 'Canceled'].includes(item.status)
 
-  useEffect(() => {
-    const previous = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = previous }
-  }, [])
+
 
   async function save(changes, message) {
+    if (saving) return
+    if (changes.date && (appointmentDateTime(changes)?.getTime() ?? 0) <= Date.now()) {
+      setError('Choose an appointment date and time in the future.')
+      return
+    }
     setSaving(true)
     setError('')
     try { const result = await onUpdate(getId(item), changes, message); if (changes.status && !result?.cancelled) onClose() }
@@ -323,39 +346,39 @@ function AppointmentManager({ item, onClose, onUpdate }) {
     finally { setSaving(false) }
   }
 
-  return <div className="doctor-drawer" role="dialog" aria-modal="true" aria-labelledby="appointment-manager-title"><button type="button" className="doctor-drawer__backdrop" onClick={onClose} aria-label="Close appointment" /><div className="doctor-drawer__panel"><header><div><span>Patient appointment</span><h2 id="appointment-manager-title">{item.patientName}</h2></div><button type="button" onClick={onClose}><X size={20} /></button></header><div className="doctor-drawer__body">
+  return <DialogPortal onClose={onClose} busy={saving} label="Appointment details"><div className="doctor-drawer" role="dialog" aria-modal="true" aria-labelledby="appointment-manager-title"><button data-dialog-close="" data-dialog-backdrop="" tabIndex={-1} type="button" className="doctor-drawer__backdrop" disabled={saving} onClick={onClose} aria-label="Close appointment" /><div data-dialog-panel="" data-dialog-drawer="" className="doctor-drawer__panel"><header><div><span>Patient appointment</span><h2 id="appointment-manager-title">{item.patientName}</h2></div><button data-dialog-close="" type="button" onClick={onClose} disabled={saving} aria-label="Close appointment"><X size={20} /></button></header><div className="doctor-drawer__body">
     <div className="doctor-drawer__status"><span className={statusClass(item.status)}><i />{item.status}</span><small>Booked {createdLabel(item.createdAt)}</small></div>
-    <section className="doctor-patient-details"><Detail icon={Phone} label="Mobile" value={item.mobile} /><Detail icon={UserRound} label="Patient" value={`${item.age || 'Age —'}${item.gender ? ` · ${item.gender}` : ''}`} /><Detail icon={CalendarDays} label="Appointment" value={`${formatDate(item.date)} · ${formatAppointmentTime(item)}`} /><Detail icon={Banknote} label="Payment" value={`${item.payment?.method || 'Cash'} · ${item.payment?.status || 'Pending'} · ${formatCurrency(item.fees)}`} /></section>
+    <section className="doctor-patient-details"><Detail icon={Phone} label="Mobile" value={item.mobile} /><Detail icon={UserRound} label="Patient" value={`${item.age || 'Age —'}${item.gender ? ` · ${item.gender}` : ''}`} /><Detail icon={CalendarDays} label="Appointment" value={`${formatDate(item.date)} · ${formatAppointmentTime(item)}`} /><Detail icon={Banknote} label="Payment" value={`${item.payment?.method || 'Cash'} · ${item.payment?.status || 'Pending'} · ${formatCurrency(item.fees, paymentCurrency(item))}`} /></section>
     {item.notes && <section className="doctor-patient-note"><span><MessageSquareText size={17} />Patient note</span><p>{item.notes}</p></section>}
     <label className="doctor-form-field"><span>Private clinical notes <small>{notes.length}/1000</small></span><textarea rows="5" maxLength="1000" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Record notes for this consultation" /></label>
     <button type="button" className="doctor-save-secondary" disabled={saving} onClick={() => save({ doctorNotes: notes }, 'Clinical notes saved.')}><Save size={16} /> Save clinical notes</button>
     {!terminal && <section className="doctor-reschedule-box"><div><span><CalendarDays size={17} />Reschedule appointment</span><small>Choose a future date and time.</small></div><div><label className="doctor-form-field"><span>New date</span><input type="date" min={localDateKey(new Date())} value={date} onChange={(event) => setDate(event.target.value)} /></label><label className="doctor-form-field"><span>New time</span><input type="time" value={time} onChange={(event) => setTime(event.target.value)} /></label></div><button type="button" disabled={saving || !date || !time} onClick={() => save({ date, time: toTwelveHour(time), doctorNotes: notes }, 'Appointment rescheduled successfully.')}><RefreshCw size={16} /> Save new time</button></section>}
     {error && <p className="doctor-inline-error"><XCircle size={16} />{error}</p>}
-  </div><footer>{!terminal && <><button type="button" disabled={saving} onClick={() => save({ status: item.status === 'Pending' ? 'Confirmed' : 'Completed', doctorNotes: notes }, item.status === 'Pending' ? 'Appointment confirmed.' : 'Appointment completed.')} className="doctor-drawer__primary"><CheckCircle2 size={16} />{item.status === 'Pending' ? 'Confirm appointment' : 'Mark completed'}</button><button type="button" disabled={saving} onClick={() => save({ status: 'Canceled', doctorNotes: notes }, 'Appointment canceled.')} className="doctor-drawer__danger">Cancel appointment</button></>}</footer></div></div>
+  </div><footer>{!terminal && <><button type="button" disabled={saving} onClick={() => save({ status: item.status === 'Pending' ? 'Confirmed' : 'Completed', doctorNotes: notes }, item.status === 'Pending' ? 'Appointment confirmed.' : 'Appointment completed.')} className="doctor-drawer__primary"><CheckCircle2 size={16} />{item.status === 'Pending' ? 'Confirm appointment' : 'Mark completed'}</button><button type="button" disabled={saving} onClick={() => save({ status: 'Canceled', doctorNotes: notes }, 'Appointment canceled.')} className="doctor-drawer__danger">Cancel appointment</button></>}</footer></div></div></DialogPortal>
 }
 
 function CashPaymentModal({ appointment, busy, onClose, onConfirm }) {
   const [cashPaymentReceived, setCashPaymentReceived] = useState(null)
 
   return (
-    <div className="fixed inset-0 z-[100] grid place-items-center px-4 py-6" role="dialog" aria-modal="true" aria-labelledby="doctor-cash-payment-title">
-      <button type="button" onClick={onClose} disabled={busy} aria-label="Close cash payment confirmation" className="absolute inset-0 bg-slate-950/55 backdrop-blur-sm disabled:cursor-wait" />
-      <section className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+    <DialogPortal onClose={onClose} busy={busy} label="Confirm cash payment"><div className="fixed inset-0 z-[100] grid place-items-center px-4 py-6" role="dialog" aria-modal="true" aria-labelledby="doctor-cash-payment-title">
+      <button data-dialog-close="" data-dialog-backdrop="" tabIndex={-1} type="button" onClick={onClose} disabled={busy} aria-label="Close cash payment confirmation" className="absolute inset-0 bg-slate-950/55  disabled:cursor-wait" />
+      <section data-dialog-panel="" className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
         <span className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><Banknote size={21} /></span>
         <h2 id="doctor-cash-payment-title" className="mt-4 text-xl font-bold text-slate-950">Confirm cash payment</h2>
         <p className="mt-2 text-sm leading-6 text-slate-500">Before completing {appointment.patientName}’s visit, confirm whether the consultation fee was received in cash.</p>
-        <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600"><strong className="text-slate-900">{formatCurrency(appointment.fees)}</strong> consultation fee</div>
+        <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600"><strong className="text-slate-900">{formatCurrency(appointment.fees, paymentCurrency(appointment))}</strong> consultation fee</div>
         <div className="mt-4 grid grid-cols-2 gap-2">
           <button type="button" aria-pressed={cashPaymentReceived === true} onClick={() => setCashPaymentReceived(true)} disabled={busy} className={`rounded-xl border px-3 py-3 text-sm font-bold transition ${cashPaymentReceived === true ? 'border-emerald-500 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-100' : 'border-slate-200 text-slate-700 hover:border-emerald-300'}`}>Yes, received</button>
           <button type="button" aria-pressed={cashPaymentReceived === false} onClick={() => setCashPaymentReceived(false)} disabled={busy} className={`rounded-xl border px-3 py-3 text-sm font-bold transition ${cashPaymentReceived === false ? 'border-amber-500 bg-amber-50 text-amber-800 ring-2 ring-amber-100' : 'border-slate-200 text-slate-700 hover:border-amber-300'}`}>No, unpaid</button>
         </div>
         <p className="mt-3 text-xs leading-5 text-slate-500">Unpaid visits can still be completed, but they will not be added to admin revenue.</p>
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button type="button" onClick={onClose} disabled={busy} className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Go back</button>
+          <button data-dialog-close="" type="button" onClick={onClose} disabled={busy} className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Go back</button>
           <button type="button" onClick={() => onConfirm(cashPaymentReceived)} disabled={busy || cashPaymentReceived === null} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">{busy && <LoaderCircle size={16} className="animate-spin" />}{busy ? 'Saving...' : 'Complete visit'}</button>
         </div>
       </section>
-    </div>
+    </div></DialogPortal>
   )
 }
 
@@ -374,7 +397,7 @@ function LaboratoryView({ appointments, tests, onOrder }) {
   return <section className="doctor-view"><ViewHeading kicker="Connected diagnostics" title="Laboratory" text="Order tests from an existing patient appointment and follow results through the laboratory workflow." /><div className="doctor-lab-layout"><form className="doctor-panel doctor-lab-order" onSubmit={submit}><PanelHeading icon={FlaskConical} title="New test order" text="Patient identity is securely copied from the selected appointment." /><div className="doctor-lab-form"><label className="doctor-form-field doctor-lab-span"><span>Patient appointment <i>*</i></span><select name="appointmentId" value={form.appointmentId} onChange={update} required><option value="">Choose patient appointment</option>{eligibleAppointments.map((item) => <option key={getId(item)} value={getId(item)}>{item.patientName} · {item.date} {item.time}</option>)}</select></label><ProfileField label="Test name" name="testName" value={form.testName} onChange={update} required placeholder="e.g. Complete Blood Count" /><label className="doctor-form-field"><span>Category</span><select name="testCategory" value={form.testCategory} onChange={update}>{['Hematology','Biochemistry','Microbiology','Immunology','Pathology','Other'].map((item) => <option key={item}>{item}</option>)}</select></label><ProfileField label="Sample type" name="sampleType" value={form.sampleType} onChange={update} required /><label className="doctor-form-field"><span>Priority</span><select name="priority" value={form.priority} onChange={update}><option value="normal">Normal</option><option value="urgent">Urgent</option></select></label><label className="doctor-form-field doctor-lab-span"><span>Clinical note <small>{form.clinicalNote.length}/1500</small></span><textarea name="clinicalNote" value={form.clinicalNote} onChange={update} rows="4" maxLength="1500" placeholder="Reason for test and relevant clinical context" /></label>{error && <p className="doctor-inline-error doctor-lab-span"><XCircle size={16} />{error}</p>}<button disabled={saving || !eligibleAppointments.length} className="doctor-profile-save doctor-lab-span">{saving ? <LoaderCircle size={17} className="animate-spin" /> : <Plus size={17} />}{saving ? 'Ordering...' : 'Order laboratory test'}</button>{!eligibleAppointments.length && <p className="doctor-lab-help doctor-lab-span">A patient appointment linked to a secure patient account is required before ordering a test.</p>}</div></form><div className="doctor-panel doctor-lab-history"><PanelHeading icon={ClipboardList} title="Test orders" text={`${tests.length} orders in your practice history.`} /><div className="doctor-lab-filters">{['All','ordered','sample-collected','processing','completed','cancelled'].map((value) => <button type="button" key={value} onClick={() => setStatus(value)} className={status === value ? 'is-active' : ''}>{prettyStatus(value)}</button>)}</div>{visible.length ? <div className="doctor-lab-list">{visible.map((item) => <article key={item._id}><div><span>{item.testCategory || item.sampleType}</span><h3>{item.testName}</h3><p>{item.patientName} · {new Date(item.orderedAt).toLocaleDateString()}</p></div><div><span className={`doctor-lab-priority doctor-lab-priority--${item.priority}`}>{prettyStatus(item.priority)}</span><span className="doctor-lab-status">{prettyStatus(item.status)}</span></div>{item.result && <p className="doctor-lab-result"><strong>Result:</strong> {item.result}</p>}</article>)}</div> : <CompactEmpty icon={FlaskConical} title="No test orders in this view" text="New laboratory orders and results will appear here." />}</div></div></section>
 }
 
-function ScheduleView({ doctor, draft, setDraft, onSave, onToggleAvailability }) {
+function ScheduleView({ doctor, draft, setDraft, onSave, onToggleAvailability, availabilityBusy }) {
   const [day, setDay] = useState(() => ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][new Date().getDay()])
   const [time, setTime] = useState('')
   const [saving, setSaving] = useState(false)
@@ -422,7 +445,7 @@ function ScheduleView({ doctor, draft, setDraft, onSave, onToggleAvailability })
       <section className="doctor-panel doctor-schedule-builder"><PanelHeading icon={Plus} title="Add recurring appointment time" text="Choose a weekday and time. It will repeat every week until you remove it." /><div><label className="doctor-form-field"><span>Weekday</span><select value={day} onChange={(event) => { setDay(event.target.value); setMessage('') }}>{WEEK_DAYS.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label><label className="doctor-form-field"><span>Time</span><input type="time" value={time} onChange={(event) => { setTime(event.target.value); setMessage('') }} /></label><button type="button" onClick={addSlot}><Plus size={17} /> Add weekly slot</button></div>{message && <p className="doctor-inline-error">{message}</p>}</section>
       <section className="doctor-panel doctor-published-schedule"><PanelHeading icon={CalendarDays} title="Recurring weekly timetable" text={`${scheduledDays.length} working ${scheduledDays.length === 1 ? 'day' : 'days'} and ${totalSlots} appointment ${totalSlots === 1 ? 'time' : 'times'} each week.`} /><div>{publishedDays.map(({ key, label, slots }) => <article key={key} className={slots.length ? '' : 'is-empty'}><header><div><span>Every week</span><strong>{label}</strong></div><div className="doctor-day-actions"><small>{slots.length ? `${slots.length} ${slots.length === 1 ? 'slot' : 'slots'}` : 'Not scheduled'}</small>{slots.length > 0 && <button type="button" onClick={() => clearDay(key)}>Cancel day</button>}</div></header>{slots.length > 0 ? <div>{slots.map((slot) => <span key={slot}><Clock3 size={14} />{slot}<button type="button" onClick={() => removeSlot(key, slot)} aria-label={`Cancel ${slot} every ${label}`}><X size={13} /></button></span>)}</div> : <p className="doctor-day-off">No recurring appointments</p>}</article>)}</div></section>
     </div><aside>
-      <section className={`doctor-panel doctor-booking-status ${isAvailable(doctor) ? 'is-online' : ''}`}><span><Activity size={23} /></span><p>Patient booking status</p><h2>{isAvailable(doctor) ? 'Accepting appointments' : 'New bookings paused'}</h2><small>{isAvailable(doctor) ? 'Patients can book the published weekly timetable on future matching dates.' : 'Your profile remains visible, but patients cannot make new bookings.'}</small><button type="button" onClick={onToggleAvailability}><i />{isAvailable(doctor) ? 'Pause new bookings' : 'Start accepting bookings'}</button></section>
+      <section className={`doctor-panel doctor-booking-status ${isAvailable(doctor) ? 'is-online' : ''}`}><span><Activity size={23} /></span><p>Patient booking status</p><h2>{isAvailable(doctor) ? 'Accepting appointments' : 'New bookings paused'}</h2><small>{isAvailable(doctor) ? 'Patients can book the published weekly timetable on future matching dates.' : 'Your profile remains visible, but patients cannot make new bookings.'}</small><button type="button" onClick={onToggleAvailability} disabled={availabilityBusy}><i />{isAvailable(doctor) ? 'Pause new bookings' : 'Start accepting bookings'}</button></section>
       <section className="doctor-panel doctor-schedule-summary"><p>Weekly schedule summary</p><div><span>Scheduled days<strong>{scheduledDays.length}</strong></span><span>Weekly time slots<strong>{totalSlots}</strong></span><span>Repeats<strong>Every week</strong></span></div><button type="button" onClick={save} disabled={saving}>{saving ? <LoaderCircle size={17} className="animate-spin" /> : <Save size={17} />}{saving ? 'Publishing...' : 'Publish weekly schedule'}</button></section>
     </aside></div>
   </section>
@@ -444,8 +467,8 @@ function ProfileView({ doctor, draft, setDraft, onSave }) {
   function selectImage(event) {
     const file = event.target.files?.[0]
     if (!file) return
-    if (!file.type.startsWith('image/')) {
-      setError('Please choose a valid image file.')
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setError('Please choose a JPG, PNG, or WebP image.')
       event.target.value = ''
       return
     }
@@ -477,7 +500,7 @@ function ProfileView({ doctor, draft, setDraft, onSave }) {
   }
   return <section className="doctor-view">
     <ViewHeading kicker="Professional identity" title="Profile settings" text="Keep the information patients see on your public doctor profile accurate and useful." />
-    <div className="doctor-profile-layout"><aside className="doctor-panel doctor-profile-preview"><div><ImageWithFallback key={imagePreview || 'profile-preview'} src={imagePreview} alt={draft.name || doctor?.name} initials={initials(draft.name || doctor?.name)} /><span className={isAvailable(doctor) ? 'availability-pill availability-pill--available' : 'availability-pill'}><i />{isAvailable(doctor) ? 'Available' : 'Unavailable'}</span></div><p>{draft.specialization || 'Medical professional'}</p><h2>{draft.name || 'Your name'}</h2><small>{draft.location || 'Location not provided'}</small><div><span>Experience<strong>{draft.experience || '—'}</strong></span><span>Consultation<strong>{formatCurrency(draft.fee)}</strong></span></div><Link to={`/doctors/${getId(doctor)}`} target="_blank">View public profile <ArrowRight size={15} /></Link></aside>
+    <div className="doctor-profile-layout"><aside className="doctor-panel doctor-profile-preview"><div><ImageWithFallback key={imagePreview || 'profile-preview'} src={imagePreview} alt={draft.name || doctor?.name} initials={initials(draft.name || doctor?.name)} /><span className={isAvailable(doctor) ? 'availability-pill availability-pill--available' : 'availability-pill'}><i />{isAvailable(doctor) ? 'Available' : 'Unavailable'}</span></div><p>{draft.specialization || 'Medical professional'}</p><h2>{draft.name || 'Your name'}</h2><small>{draft.location || 'Location not provided'}</small><div><span>Experience<strong>{draft.experience || '—'}</strong></span><span>Consultation<strong>{formatCurrency(draft.fee)}</strong></span></div><Link to={`/doctors/${getId(doctor)}`} target="_blank" rel="noopener noreferrer">View public profile <ArrowRight size={15} /></Link></aside>
       <form className="doctor-panel doctor-profile-form" onSubmit={submit}><PanelHeading icon={Edit3} title="Professional information" text="These details appear in the patient directory." /><div className="doctor-profile-photo"><ImageWithFallback key={imagePreview || 'profile-photo'} src={imagePreview} alt={draft.name || doctor?.name} initials={initials(draft.name || doctor?.name)} /><div><strong>Profile picture</strong><p>Upload a JPG, PNG, or WebP image up to 5 MB.</p><span><label><Camera size={16} />{imageFile ? 'Choose another' : 'Choose photo'}<input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={selectImage} /></label>{imageFile && <button type="button" onClick={clearSelectedImage}>Remove selection</button>}</span>{imageFile && <small>{imageFile.name}</small>}</div></div><div className="doctor-profile-form__grid"><ProfileField label="Display name" name="name" value={draft.name} onChange={change} required /><ProfileField label="Specialization" name="specialization" value={draft.specialization} onChange={change} /><ProfileField label="Experience" name="experience" value={draft.experience} onChange={change} placeholder="e.g. 10 years" /><ProfileField label="Qualifications" name="qualifications" value={draft.qualifications} onChange={change} /><ProfileField label="Practice location" name="location" value={draft.location} onChange={change} /><ProfileField label="Consultation fee" name="fee" type="number" min="0" value={draft.fee} onChange={change} /></div><label className="doctor-form-field"><span>About your practice <small>{draft.about.length}/1200</small></span><textarea name="about" rows="6" maxLength="1200" value={draft.about} onChange={change} placeholder="Describe your expertise and approach to patient care" /></label>{error && <p className="doctor-inline-error"><XCircle size={16} />{error}</p>}<button type="submit" className="doctor-profile-save" disabled={saving}>{saving ? <LoaderCircle size={17} className="animate-spin" /> : <Save size={17} />}{saving ? 'Saving profile...' : 'Save changes'}</button></form>
     </div>
   </section>
@@ -492,8 +515,16 @@ function ProfileField({ label, required, ...props }) { return <label className="
 
 function TodayAppointment({ item, onUpdate }) {
   const [working, setWorking] = useState(false)
-  async function confirm() { setWorking(true); try { await onUpdate(getId(item), { status: item.status === 'Pending' ? 'Confirmed' : 'Completed' }, item.status === 'Pending' ? 'Appointment confirmed.' : 'Appointment completed.') } finally { setWorking(false) } }
-  return <article><span>{formatAppointmentTime(item)}</span><div className="doctor-patient-avatar">{initials(item.patientName)}</div><div><strong>{item.patientName}</strong><small>{item.mobile} · {item.age ? `${item.age} years` : 'Age not provided'}</small></div><i className={statusClass(item.status)}>{item.status}</i>{!['Completed', 'Canceled'].includes(item.status) && <button type="button" onClick={confirm} disabled={working}>{working ? <LoaderCircle size={15} className="animate-spin" /> : <Check size={15} />}{item.status === 'Pending' ? 'Confirm' : 'Complete'}</button>}</article>
+  const [error, setError] = useState('')
+  async function confirm() {
+    if (working) return
+    setWorking(true)
+    setError('')
+    try { await onUpdate(getId(item), { status: item.status === 'Pending' ? 'Confirmed' : 'Completed' }, item.status === 'Pending' ? 'Appointment confirmed.' : 'Appointment completed.') }
+    catch (updateError) { setError(updateError.message || 'Unable to update this appointment.') }
+    finally { setWorking(false) }
+  }
+  return <article><span>{formatAppointmentTime(item)}</span><div className="doctor-patient-avatar">{initials(item.patientName)}</div><div><strong>{item.patientName}</strong><small>{item.mobile} · {item.age !== undefined && item.age !== null && item.age !== '' ? `${item.age} years` : 'Age not provided'}</small>{error && <p className="doctor-inline-error" role="alert">{error}</p>}</div><i className={statusClass(item.status)}>{item.status}</i>{!['Completed', 'Canceled'].includes(item.status) && <button type="button" onClick={confirm} disabled={working}>{working ? <LoaderCircle size={15} className="animate-spin" /> : <Check size={15} />}{item.status === 'Pending' ? 'Confirm' : 'Complete'}</button>}</article>
 }
 
 function profileFromDoctor(doctor) { return Object.fromEntries(profileFields.map((field) => [field, doctor?.[field] ?? ''])) }

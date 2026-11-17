@@ -6,6 +6,7 @@ import Footer from '../components/Footer'
 import Navbar from '../components/Navbar'
 import { PageIntro } from '../components/PatientUi'
 import { patientApi } from '../lib/api'
+import { isValidPhone } from '../lib/validation'
 
 const initialForm = { name: '', email: '', mobile: '', subject: 'Appointment support', message: '' }
 
@@ -36,12 +37,18 @@ export default function Contact() {
 
   async function submit(event) {
     event.preventDefault()
+    if (submitting) return
+    setSuccess('')
     if (!form.name.trim() || !form.email.trim() || !form.subject.trim() || !form.message.trim()) {
       setError('Complete the required fields before sending your message.')
       return
     }
     if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) {
       setError('Enter a valid email address.')
+      return
+    }
+    if (form.mobile.trim() && !isValidPhone(form.mobile)) {
+      setError('Enter a valid mobile number or leave the optional field blank.')
       return
     }
 
@@ -71,7 +78,7 @@ export default function Contact() {
               <div className="patient-form-grid">
                 <Field label="Full name" name="name" value={form.name} onChange={updateForm} placeholder="Your name" required />
                 <Field label="Email address" name="email" type="email" value={form.email} onChange={updateForm} placeholder="you@example.com" required />
-                <Field label="Mobile number" name="mobile" value={form.mobile} onChange={updateForm} placeholder="Optional" />
+                <Field label="Mobile number" name="mobile" type="tel" autoComplete="tel" value={form.mobile} onChange={updateForm} placeholder="Optional" />
                 <label className="patient-field"><span>What do you need help with?<i>*</i></span><select name="subject" value={form.subject} onChange={updateForm}><option>Appointment support</option><option>Doctor information</option><option>Service information</option><option>Payment question</option><option>Technical support</option><option>General question</option></select></label>
               </div>
               <label className="patient-field"><span>Message<i>*</i><small>{form.message.length}/2000</small></span><textarea name="message" value={form.message} onChange={updateForm} rows="7" maxLength="2000" placeholder="Tell us how we can help" required /></label>

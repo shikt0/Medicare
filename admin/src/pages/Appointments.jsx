@@ -1,3 +1,4 @@
+import DialogPortal from '../components/DialogPortal'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   CalendarClock,
@@ -19,7 +20,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { api } from '../lib/api'
-import { doctorNameFromAppointment, formatCurrency, formatDate, getId } from '../lib/format'
+import { bookingCurrency, doctorNameFromAppointment, formatCurrency, formatDate, formatRevenue, getId } from '../lib/format'
 
 const PAGE_SIZE = 12
 const STATUS_FILTERS = ['', 'Pending', 'Confirmed', 'Rescheduled', 'Completed', 'Canceled']
@@ -69,7 +70,7 @@ export default function Appointments() {
       setError(loadError.message || 'Unable to load appointments.')
       return false
     } finally {
-      if (!quiet && requestId === requestSequence.current) setLoading(false)
+      if (requestId === requestSequence.current) setLoading(false)
     }
   }, [])
 
@@ -87,7 +88,10 @@ export default function Appointments() {
     const timeout = window.setTimeout(() => {
       fetchAppointments({ search: search.trim(), status, page, limit: PAGE_SIZE })
     }, search ? 300 : 0)
-    return () => window.clearTimeout(timeout)
+    return () => {
+      window.clearTimeout(timeout)
+      requestSequence.current += 1
+    }
   }, [fetchAppointments, page, search, status])
 
   useEffect(() => {
@@ -95,19 +99,7 @@ export default function Appointments() {
     return () => window.clearTimeout(timeout)
   }, [fetchStats])
 
-  useEffect(() => {
-    const modalOpen = Boolean(selectedAppointment || pendingAction)
-    if (!modalOpen) return undefined
 
-    function closeOnEscape(event) {
-      if (event.key !== 'Escape' || workingId) return
-      setSelectedAppointment(null)
-      setPendingAction(null)
-    }
-
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [pendingAction, selectedAppointment, workingId])
 
   const totalPages = Math.max(1, Math.ceil(Number(meta.total || 0) / PAGE_SIZE))
   const statusCounts = { ...initialStats.statusCounts, ...(stats.statusCounts || {}) }
@@ -244,7 +236,7 @@ export default function Appointments() {
           <SummaryCard icon={CalendarDays} label="Total appointments" value={stats.total} detail={`${stats.recentLast7Days || 0} created in the last 7 days`} tone="sky" />
           <SummaryCard icon={Clock3} label="Pending" value={statusCounts.Pending} detail="Needs admin follow-up" tone="amber" />
           <SummaryCard icon={CheckCircle2} label="Completed" value={statusCounts.Completed} detail={`${statusCounts.Confirmed} currently confirmed`} tone="emerald" />
-          <SummaryCard icon={WalletCards} label="Doctor-visit revenue" value={formatCurrency(stats.revenue)} detail="Completed visits marked paid" tone="violet" />
+          <SummaryCard icon={WalletCards} label="Doctor-visit revenue" value={formatRevenue(stats.revenue, stats.revenueByCurrency)} detail="Completed paid visits, by currency" tone="violet" />
         </section>
 
         <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -413,7 +405,7 @@ function AppointmentRow({ appointment, workingId, onStatusChange, onManage }) {
       <div>
         <MobileLabel>Payment</MobileLabel>
         <PaymentBadge value={appointment.payment?.status || 'Pending'} />
-        <p className="mt-1 text-xs font-bold text-slate-700">{formatCurrency(appointment.fees)}</p>
+        <p className="mt-1 text-xs font-bold text-slate-700">{formatCurrency(appointment.fees, bookingCurrency(appointment))}</p>
       </div>
 
       <div>
@@ -493,7 +485,7 @@ function AppointmentModal({ appointment, busy, onClose, onReschedule, onCancel }
           <Detail icon={Stethoscope} label="Doctor" value={`Dr. ${doctorNameFromAppointment(appointment)}`} detail={appointment.speciality || appointment.doctorId?.specialization || 'General medicine'} />
           <Detail icon={CalendarDays} label="Schedule" value={formatDate(appointment.date)} detail={appointment.time || '-'} />
           <Detail icon={CreditCard} label="Payment" value={appointment.payment?.method || 'Cash'} detail={appointment.payment?.status || 'Pending'} />
-          <Detail icon={WalletCards} label="Consultation fee" value={formatCurrency(appointment.fees)} />
+          <Detail icon={WalletCards} label="Consultation fee" value={formatCurrency(appointment.fees, bookingCurrency(appointment))} />
         </div>
 
         {appointment.rescheduledTo?.date && (
@@ -615,10 +607,10 @@ function ConfirmActionModal({ action, busy, onClose, onConfirm }) {
 
 function ModalShell({ children, onClose, titleId, closeDisabled, size = 'max-w-2xl' }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center px-4 py-6" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-      <button type="button" aria-label="Close dialog" onClick={onClose} disabled={closeDisabled} className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm disabled:cursor-wait" />
-      <section className={`relative w-full ${size} overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl`}>{children}</section>
-    </div>
+    <DialogPortal onClose={onClose} busy={closeDisabled} label="Appointment details"><div className="fixed inset-0 z-50 grid place-items-center px-4 py-6" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <button data-dialog-close="" data-dialog-backdrop="" tabIndex={-1} type="button" aria-label="Close dialog" onClick={onClose} disabled={closeDisabled} className="absolute inset-0 bg-slate-950/45  disabled:cursor-wait" />
+      <section data-dialog-panel="" className={`relative w-full ${size} overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl`}>{children}</section>
+    </div></DialogPortal>
   )
 }
 

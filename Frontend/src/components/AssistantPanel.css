@@ -1,0 +1,89 @@
+.care-assistant-launcher { position: fixed; right: max(1.25rem, env(safe-area-inset-right)); bottom: max(1.25rem, env(safe-area-inset-bottom)); z-index: 80; display: inline-flex; align-items: center; gap: .65rem; min-height: 48px; padding: .8rem 1.1rem; border: 1px solid #487b68; border-radius: 999px; background: #174d3c; color: #fff; box-shadow: 0 8px 25px #132f3029; font-family: inherit; font-size: .85rem; font-weight: 600; line-height: 1.2; cursor: pointer; }
+.care-assistant-launcher:hover { background: #21624c; transform: translateY(-2px); }
+.care-assistant-overlay { display: flex; justify-content: flex-end; background: #102c2240; }
+.care-assistant-backdrop { position: absolute; inset: 0; border: 0; cursor: default; }
+.care-assistant[data-dialog-panel] { width: min(100%, 480px); height: 100dvh; max-height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: #fafaf6; color: #203d32; box-shadow: -15px 0 60px #0b2b2826; font-family: inherit; }
+.care-assistant *, .care-assistant *::before, .care-assistant *::after { box-sizing: border-box; }
+.care-assistant button, .care-assistant input, .care-assistant select, .care-assistant textarea { font: inherit; }
+.care-assistant button { cursor: pointer; }
+.care-assistant button:disabled { opacity: .5; cursor: not-allowed; }
+.care-assistant-header { display: flex; align-items: center; gap: .55rem; padding: 1.3rem 1.25rem 1.1rem; border-bottom: 1px solid #dce5dc; flex-shrink: 0; }
+.care-assistant-header > div { min-width: 0; flex: 1; }
+.care-assistant-header p { margin: 0 0 .25rem; color: #62766c; font-size: .72rem; overflow-wrap: anywhere; }
+.care-assistant-header h2 { margin: 0; font-size: 1.1rem; font-weight: 650; letter-spacing: -.025em; }
+.care-assistant-mark { width: 43px; height: 43px; display: grid; place-items: center; flex-shrink: 0; background: #e8eee3; border-radius: 50%; color: #27563e; }
+.care-assistant-icon { display: grid; place-items: center; flex-shrink: 0; border: 1px solid #dce5dc; color: #365246; background: #fff; width: 36px; height: 36px; border-radius: 50%; }
+.care-assistant-status { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .55rem 1.25rem; color: #62766c; border-bottom: 1px solid #e2e7de; font-size: .72rem; flex-shrink: 0; }
+.care-assistant-status span { display: flex; align-items: center; gap: .45rem; }
+.care-assistant-status i { width: 6px; height: 6px; border-radius: 50%; background: #a79878; flex-shrink: 0; }
+.care-assistant-status i.is-online { background: #2e8561; }
+.care-assistant-status button { padding: .3rem; border: 0; background: transparent; color: inherit; }
+.care-assistant-tabs { display: grid; grid-template-columns: 1fr 1fr; padding: .6rem 1.1rem; gap: .45rem; border-bottom: 1px solid #e2e7de; flex-shrink: 0; }
+.care-assistant-tabs button { display: flex; justify-content: center; align-items: center; gap: .4rem; padding: .65rem .3rem; border: 0; border-radius: .4rem; background: transparent; color: #68796f; font-size: .75rem; font-weight: 600; }
+.care-assistant-tabs button[aria-current] { background: #e5ece1; color: #1e533e; }
+.care-assistant-conversation, .care-assistant-booking { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 1.35rem 1.25rem; }
+.care-assistant-eyebrow { color: #6a7b62; font-size: .65rem; font-weight: 700; letter-spacing: .12em; margin: 0 0 .6rem; }
+.care-assistant-intro h3, .care-assistant-booking-heading h3 { font-family: Georgia, 'Times New Roman', serif; font-size: 1.7rem; line-height: 1.15; font-weight: 400; letter-spacing: -.035em; margin: 0 0 .65rem; overflow-wrap: anywhere; }
+.care-assistant-intro > p:not(.care-assistant-eyebrow), .care-assistant-booking-heading > p:not(.care-assistant-eyebrow) { color: #66776d; font-size: .8rem; line-height: 1.6; margin: 0 0 1rem; }
+.care-assistant-prompts { display: flex; flex-wrap: wrap; gap: .45rem; margin: .9rem 0 1.35rem; }
+.care-assistant-prompts button { display: flex; align-items: center; gap: .3rem; border: 1px solid #dce4d7; background: #fff; color: #385443; border-radius: .4rem; padding: .5rem .65rem; font-size: .72rem; }
+.care-assistant-prompts button:hover { background: #edf2e9; }
+.care-assistant-messages { display: flex; flex-direction: column; gap: 1rem; }
+.care-assistant-message { max-width: 94%; min-width: 0; padding: .85rem 1rem; border: 1px solid #e1e7dc; border-radius: .75rem .75rem .75rem .15rem; background: #fff; align-self: flex-start; }
+.care-assistant-message > span { display: block; font-size: .65rem; color: #607463; font-weight: 650; margin-bottom: .4rem; }
+.care-assistant-message > p { margin: 0; font-size: .82rem; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.care-assistant-message--user { align-self: flex-end; border-color: #dde6d6; background: #e8eedf; border-radius: .75rem .75rem .15rem .75rem; }
+.care-assistant-sources { padding-left: 1rem; margin: .75rem 0 0; font-size: .75rem; overflow-wrap: anywhere; }
+.care-assistant-sources a { color: #27674e; text-decoration: underline; }
+.care-assistant-patients { display: grid; gap: .7rem; margin-top: .8rem; padding-top: .8rem; border-top: 1px solid #e2e8dc; }
+.care-assistant-patient { display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; }
+.care-assistant-patients strong { font-size: .75rem; }
+.care-assistant-patients small { font-size: .68rem; color: #6b7d61; }
+.care-assistant-patients button { display: inline-flex; align-items: center; gap: .25rem; background: #eaf0e3; color: #31573d; border: 1px solid #d9e3cf; border-radius: .3rem; padding: .35rem .5rem; font-size: .7rem; }
+.care-assistant-more-patients summary { color: #31573d; font-size: .73rem; cursor: pointer; padding: .3rem 0; }
+.care-assistant-more-patients > div { display: grid; gap: .7rem; padding-top: .6rem; }
+.care-assistant-suggestions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .8rem; }
+.care-assistant-suggestions button { max-width: 100%; overflow-wrap: anywhere; border: 1px solid #d3dfca; border-radius: 999px; background: #f5f7ef; color: #31573d; padding: .4rem .65rem; text-align: left; font-size: .72rem; line-height: 1.4; }
+.care-assistant-suggestions button:hover { background: #eaf0e3; }
+.care-assistant-thinking { display: flex; align-items: center; gap: .5rem; color: #687d6b; font-size: .75rem; line-height: 1.4; margin: .75rem 0; }
+.care-assistant-offline { display: flex; align-items: flex-start; gap: .5rem; background: #f0eee3; padding: .75rem; border-radius: .4rem; color: #6b634c; margin: 0 0 1rem; }
+.care-assistant-offline svg { flex-shrink: 0; margin-top: .1rem; }
+.care-assistant-offline p { font-size: .75rem; line-height: 1.55; margin: 0; }
+.care-assistant-error { background: #fff0e9; color: #9d4530; font-size: .78rem; line-height: 1.55; border: 1px solid #efd7cc; border-radius: .4rem; padding: .75rem; margin: 1rem 0 0; overflow-wrap: anywhere; }
+.care-assistant-error p { margin: 0; }
+.care-assistant-error button { display: flex; align-items: center; gap: .3rem; border: 0; background: transparent; text-decoration: underline; color: inherit; padding: .5rem 0 0; font-size: .75rem; }
+.care-assistant-composer { display: flex; align-items: flex-end; gap: .5rem; margin: .75rem 1.1rem .55rem; padding: .55rem; border: 1px solid #ced9c9; border-radius: .6rem; background: #fff; flex-shrink: 0; }
+.care-assistant-composer textarea { flex: 1; width: 100%; resize: none; border: 0; background: transparent; color: #203d32; font-size: .8rem; line-height: 1.5; padding: .3rem; max-height: 100px; }
+.care-assistant-send { display: grid; place-items: center; width: 35px; height: 35px; flex-shrink: 0; border: 0; border-radius: .4rem; color: #fff; background: #24553c; }
+.care-assistant footer.care-assistant-note { display: flex; align-items: flex-start; gap: .4rem; flex-wrap: nowrap; padding: .2rem 1.2rem max(.85rem, env(safe-area-inset-bottom)); color: #73816e; flex-shrink: 0; }
+.care-assistant-note svg { flex-shrink: 0; margin-top: .1rem; }
+.care-assistant-note p { margin: 0; font-size: .63rem; line-height: 1.5; }
+.care-assistant-draft { display: flex; gap: .75rem; padding: 1rem; border: 1px solid #cbdac2; border-radius: .6rem; margin-top: 1rem; background: #edf2e5; }
+.care-assistant-draft > svg { flex-shrink: 0; margin-top: .1rem; }
+.care-assistant-draft strong { font-size: .8rem; }
+.care-assistant-draft p { margin: .4rem 0; font-size: .75rem; line-height: 1.5; }
+.care-assistant-draft button { display: flex; align-items: center; gap: .3rem; background: transparent; border: 0; font-size: .75rem; font-weight: 700; padding: .35rem 0; color: #24553c; }
+.care-assistant-draft small { display: block; font-size: .65rem; color: #6b7d61; }
+.care-assistant-booking form, .care-assistant-booking fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+.care-assistant-field { display: flex; flex-direction: column; gap: .4rem; margin-bottom: .9rem; min-width: 0; }
+.care-assistant-field > span { font-size: .75rem; font-weight: 600; color: #3d5848; }
+.care-assistant-field small { font-size: .63rem; color: #7a8873; font-weight: 400; margin-left: .2rem; }
+.care-assistant-field input, .care-assistant-field select, .care-assistant-field textarea { width: 100%; min-height: 40px; background: #fff; color: #2b4b39; border: 1px solid #d6dfce; border-radius: .35rem; padding: .6rem .7rem; font-size: .8rem; }
+.care-assistant-field textarea { resize: vertical; }
+.care-assistant-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: .65rem; }
+.care-assistant-empty, .care-assistant-timezone { font-size: .75rem; color: #6a7b62; line-height: 1.6; margin: .25rem 0 1rem; }
+.care-assistant-timezone { font-size: .65rem; }
+.care-assistant-booking-review { display: flex; flex-direction: column; gap: .4rem; border-left: 3px solid #638b4f; background: #edf1e7; padding: .85rem 1rem; margin: .75rem 0 1.25rem; font-size: .8rem; }
+.care-assistant-booking-review span { font-size: .75rem; color: #5a7250; }
+.care-assistant-confirm { display: flex; width: 100%; align-items: center; justify-content: center; gap: .5rem; border: 0; padding: .85rem .5rem; border-radius: .4rem; background: #23513b; color: #fff; font-size: .8rem; font-weight: 600; }
+.care-assistant-success { padding: 1.2rem; border: 1px solid #cedfc2; border-radius: .6rem; background: #edf4e6; }
+.care-assistant-success h3 { font-family: Georgia, serif; font-size: 1.5rem; margin: .7rem 0 .4rem; }
+.care-assistant-success p { font-size: .8rem; line-height: 1.6; margin: 0 0 1rem; }
+.care-assistant-success a { display: flex; align-items: center; gap: .3rem; font-size: .8rem; font-weight: 600; color: #23513b; }
+.care-assistant-success button { border: 0; background: transparent; text-decoration: underline; color: #567047; font-size: .75rem; padding: .75rem 0 0; }
+.care-assistant-spin { animation: care-assistant-spin 1s linear infinite; }
+@keyframes care-assistant-spin { to { transform: rotate(360deg); } }
+.care-assistant-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+@media (max-width: 559px) { .care-assistant-launcher { right: .85rem; bottom: max(.85rem, env(safe-area-inset-bottom)); } .care-assistant-header { padding: 1rem; } .care-assistant-header h2 { font-size: 1rem; } .care-assistant-conversation, .care-assistant-booking { padding: 1.1rem 1rem; } .care-assistant-intro h3, .care-assistant-booking-heading h3 { font-size: 1.5rem; } .care-assistant-tabs { padding: .5rem .75rem; } .care-assistant-tabs button { font-size: .7rem; } }
+@media (max-height: 560px) { .care-assistant-header { padding-top: .7rem; padding-bottom: .7rem; } .care-assistant-mark { width: 35px; height: 35px; } .care-assistant-status { padding-top: .3rem; padding-bottom: .3rem; } .care-assistant-tabs { padding-top: .3rem; padding-bottom: .3rem; } .care-assistant-composer { margin-top: .4rem; margin-bottom: .4rem; } }
+@media (prefers-reduced-motion: reduce) { .care-assistant-spin { animation: none; } .care-assistant-launcher:hover { transform: none; } }

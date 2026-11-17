@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowUpRight, KeyRound, Menu, ShieldCheck, UserRound, X } from 'lucide-react'
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import { useAuth, UserButton } from '@clerk/react'
 import logo from '../assets/logo.png'
 
@@ -15,21 +15,14 @@ const navItems = [
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
-  const [showNavbar, setShowNavbar] = useState(true)
-  const lastScrollY = useRef(0)
   const navRef = useRef(null)
+  const menuButtonRef = useRef(null)
+  const { pathname } = useLocation()
   const { isSignedIn } = useAuth()
 
   useEffect(() => {
-    function handleScroll() {
-      const currentScrollY = window.scrollY
-      setShowNavbar(!(currentScrollY > lastScrollY.current && currentScrollY > 80))
-      lastScrollY.current = currentScrollY
-    }
-
-    window.addEventListener('scroll', handleScroll, { passive: true })
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [])
+    setIsOpen(false)
+  }, [pathname])
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -37,19 +30,23 @@ export default function Navbar() {
     }
 
     function closeOnEscape(event) {
-      if (event.key === 'Escape') setIsOpen(false)
+      if (event.key === 'Escape' && isOpen) {
+        setIsOpen(false)
+        menuButtonRef.current?.focus()
+      }
     }
 
-    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('pointerdown', handleClickOutside)
     window.addEventListener('keydown', closeOnEscape)
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('pointerdown', handleClickOutside)
       window.removeEventListener('keydown', closeOnEscape)
     }
   }, [isOpen])
 
   return (
-    <header ref={navRef} className={`site-navbar ${showNavbar ? 'site-navbar--visible' : 'site-navbar--hidden'}`}>
+    <header ref={navRef} className="site-navbar">
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <nav className="site-navbar__inner" aria-label="Primary navigation">
         <Link to="/" onClick={() => setIsOpen(false)} className="site-brand" aria-label="MediCare home">
           <span className="site-brand__mark"><img src={logo} alt="" /></span>
@@ -90,6 +87,7 @@ export default function Navbar() {
           )}
 
           <button
+            ref={menuButtonRef}
             type="button"
             onClick={() => setIsOpen((current) => !current)}
             className="site-menu-button"

@@ -1,4 +1,4 @@
-import React from 'react'
+import { lazy, Suspense } from 'react'
 import { Route, Routes } from 'react-router-dom'
 import Home from './pages/Home'
 import BasicPage from './pages/BasicPage'
@@ -10,14 +10,18 @@ import Appointments from './pages/Appointments'
 import Contact from './pages/Contact'
 import DoctorLogin from './pages/DoctorLogin'
 import PaymentResult from './pages/PaymentResult'
-import DoctorPortal from './pages/DoctorPortal'
 import LabResults from './pages/LabResults'
 import LoginPortal from './pages/LoginPortal'
 import PatientLogin from './pages/PatientLogin'
+import RouteExperience from './components/RouteExperience'
+import AssistantPanel from './components/AssistantPanel'
+
+const DoctorPortal = lazy(() => import('./pages/DoctorPortal'))
 
 const App = () => {
   return (
     <div>
+      <RouteExperience />
       <Routes>
         <Route path='/' element={<Home/>}/>
         <Route path='/doctors' element={<Doctors/>}/>
@@ -32,7 +36,7 @@ const App = () => {
         <Route path='/patient-sign-up/*' element={<PatientLogin mode="sign-up"/>}/>
         <Route path='/doctor/login' element={<DoctorLogin/>}/>
         <Route path='/doctor-admin/login' element={<DoctorLogin/>}/>
-        <Route path='/doctor-portal/*' element={<DoctorPortal/>}/>
+        <Route path='/doctor-portal/*' element={<Suspense fallback={<main className="route-loading" role="status">Opening your clinical workspace…</main>}><DoctorPortal/></Suspense>}/>
         <Route path='/appointment/success' element={<PaymentResult kind="doctor" outcome="success"/>}/>
         <Route path='/appointment/cancel' element={<PaymentResult kind="doctor" outcome="cancel"/>}/>
         <Route path='/service-appointment/success' element={<PaymentResult kind="service" outcome="success"/>}/>
@@ -40,6 +44,7 @@ const App = () => {
         <Route path='*' element={<BasicPage title="Page Not Found"/>}/>
 
       </Routes>
+      <AssistantPanel />
     </div>
   )
 }

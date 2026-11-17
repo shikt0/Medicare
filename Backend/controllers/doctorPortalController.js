@@ -1,6 +1,8 @@
 import Appointment from '../models/Appointment.js'
 import { evaluateCashPaymentOnCompletion } from '../utils/cashCompletion.js'
-import { normalizeWeeklySchedule } from '../utils/weeklySchedule.js'
+import { isWeeklySlotAvailable, normalizeTimeSlot, normalizeWeeklySchedule, timeSlotMinutes, weekdayKeyForDate } from '../utils/weeklySchedule.js'
+import { localDateKey } from '../utils/validation.js'
+import { handleAppointmentSlotError, requireAppointmentSlotIndex } from '../utils/appointmentSlots.js'
 
 const APPOINTMENT_STATUSES = ['Pending', 'Confirmed', 'Completed', 'Canceled', 'Rescheduled']
 
@@ -17,10 +19,6 @@ function serializeDoctor(doctor) {
 
 function escapeRegExp(value = '') {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-function isValidTime(value) {
-  return /^(0?[1-9]|1[0-2]):[0-5]\d\s(AM|PM)$/i.test(String(value || '').trim())
 }
 
 export async function getDoctorPortalMe(req, res) {
@@ -103,18 +101,28 @@ export async function updateDoctorPortalAppointment(req, res) {
 
     if (date !== undefined || time !== undefined) {
       if (terminal) return res.status(400).json({ success: false, message: 'Completed or canceled appointments cannot be rescheduled' })
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
+      if (!weekdayKeyForDate(date)) {
         return res.status(400).json({ success: false, message: 'Choose a valid appointment date' })
       }
-      if (!isValidTime(time)) {
+      const normalizedTime = normalizeTimeSlot(time)
+      if (!normalizedTime) {
         return res.status(400).json({ success: false, message: 'Choose a valid appointment time' })
       }
-      const today = new Date().toISOString().slice(0, 10)
-      if (String(date) < today) {
-        return res.status(400).json({ success: false, message: 'The appointment date cannot be in the past' })
+      const now = new Date()
+      const today = localDateKey(now)
+      if (String(date) < today || (String(date) === today && timeSlotMinutes(normalizedTime) <= now.getHours() * 60 + now.getMinutes())) {
+        return res.status(400).json({ success: false, message: 'The appointment time must be in the future' })
+      }
+      if (req.doctor.availability !== 'Available' || !isWeeklySlotAvailable(req.doctor.schedule, date, normalizedTime)) {
+        return res.status(409).json({ success: false, message: 'This time is not available in your weekly schedule' })
+      }
+      await requireAppointmentSlotIndex(Appointment.collection)
+      const conflict = await Appointment.findOne({ _id: { $ne: appointment._id }, doctorId: doctorId(req), date: String(date), time: normalizedTime, status: { $ne: 'Canceled' } }).lean()
+      if (conflict) {
+        return res.status(409).json({ success: false, message: 'This appointment time has already been booked' })
       }
       appointment.date = String(date)
-      appointment.time = String(time).trim().toUpperCase()
+      appointment.time = normalizedTime
       appointment.rescheduledTo = { date: appointment.date, time: appointment.time }
       appointment.status = 'Rescheduled'
     }
@@ -128,6 +136,7 @@ export async function updateDoctorPortalAppointment(req, res) {
     await appointment.save()
     return res.json({ success: true, appointment: appointment.toObject() })
   } catch (error) {
+    if (handleAppointmentSlotError(error, res)) return
     if (error?.name === 'CastError') return res.status(400).json({ success: false, message: 'Invalid appointment identifier' })
     console.error('updateDoctorPortalAppointment error:', error)
     return res.status(500).json({ success: false, message: 'Unable to update appointment' })

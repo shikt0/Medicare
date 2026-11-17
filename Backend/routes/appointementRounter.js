@@ -6,7 +6,7 @@ import { authenticateActor, requireRole } from '../middlewares/auth.js'
 const appointmentRouter =express.Router();
 
 appointmentRouter.get("/",authenticateActor,requireRole('admin'),getAppointment);
-appointmentRouter.get("/confirm",confirmPayment);
+appointmentRouter.get("/confirm",authenticateActor,requireRole('patient','admin'),confirmPayment);
 appointmentRouter.get("/stats/summary",authenticateActor,requireRole('admin'),getStats);
 
 

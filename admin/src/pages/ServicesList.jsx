@@ -1,3 +1,4 @@
+import DialogPortal from '../components/DialogPortal'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
@@ -22,7 +23,7 @@ import {
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
-import { formatCurrency, getId } from '../lib/format'
+import { DEFAULT_CURRENCY, formatCurrency, formatRevenue, getId, mergeRevenueBreakdowns, revenueAmount } from '../lib/format'
 
 const PAGE_SIZE = 9
 
@@ -79,12 +80,7 @@ export default function ServicesList() {
     return () => window.clearTimeout(timeout)
   }, [notice])
 
-  useEffect(() => {
-    if (!editingService && !deleteTarget) return undefined
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = previousOverflow }
-  }, [deleteTarget, editingService])
+
 
   const services = useMemo(() => mergeServices(definitions, stats), [definitions, stats])
 
@@ -107,7 +103,7 @@ export default function ServicesList() {
       if (sort === 'name') return serviceName(first).localeCompare(serviceName(second))
       if (sort === 'price') return asNumber(second.price) - asNumber(first.price)
       if (sort === 'bookings') return asNumber(second.totalAppointments) - asNumber(first.totalAppointments)
-      if (sort === 'revenue') return asNumber(second.earning) - asNumber(first.earning)
+      if (sort === 'revenue') return revenueAmount(second.earningsByCurrency) - revenueAmount(first.earningsByCurrency)
       return new Date(second.createdAt || 0) - new Date(first.createdAt || 0)
     })
   }, [query, services, sort])
@@ -204,7 +200,7 @@ export default function ServicesList() {
           <SummaryCard icon={Stethoscope} label="Total services" value={services.length} detail="All open around the clock" tone="sky" />
           <SummaryCard icon={CircleCheck} label="Availability" value="24/7" detail="No schedule required" tone="emerald" />
           <SummaryCard icon={CalendarClock} label="Total requests" value={summary.bookings} detail={`${summary.completed} completed`} tone="violet" />
-          <SummaryCard icon={WalletCards} label="Service revenue" value={formatCurrency(summary.revenue)} detail="Completed requests marked paid" tone="amber" />
+          <SummaryCard icon={WalletCards} label="Service revenue" value={formatRevenue(summary.revenue, mergeRevenueBreakdowns(services.map((service) => service.earningsByCurrency)))} detail="Completed paid requests, by currency" tone="amber" />
         </section>
 
         <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -240,7 +236,7 @@ export default function ServicesList() {
                     <option value="name">Name A-Z</option>
                     <option value="price">Highest price</option>
                     <option value="bookings">Most bookings</option>
-                    <option value="revenue">Highest revenue</option>
+                    <option value="revenue">Highest {DEFAULT_CURRENCY} revenue</option>
                   </select>
                 </label>
               </div>
@@ -323,7 +319,7 @@ function ServiceCard({ service, expanded, onToggle, onEdit, onDelete }) {
         <div className="mt-4 grid grid-cols-3 divide-x divide-slate-100 rounded-xl bg-slate-50 px-2 py-3 text-center">
           <Metric label="Bookings" value={asNumber(service.totalAppointments)} />
           <Metric label="Completed" value={asNumber(service.completed)} />
-          <Metric label="Revenue" value={formatCompactCurrency(service.earning)} />
+          <Metric label="Revenue" value={formatRevenue(service.earning, service.earningsByCurrency)} />
         </div>
 
         {expanded && (
@@ -374,13 +370,6 @@ function EditServiceModal({ service, saving, onClose, onSave }) {
 
   useEffect(() => () => revokePreviewUrl(objectUrlRef), [])
 
-  useEffect(() => {
-    function closeOnEscape(event) {
-      if (event.key === 'Escape' && !saving) onClose()
-    }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [onClose, saving])
 
   function changeField(event) {
     const { name, value } = event.target
@@ -447,18 +436,18 @@ function EditServiceModal({ service, saving, onClose, onSave }) {
   const displayedImage = previewUrl || form.imageUrl.trim() || service.imageUrl || service.image || ''
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-3 backdrop-blur-sm sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose() }}>
-      <form onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="edit-service-title" className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+    <DialogPortal onClose={onClose} busy={saving} label="Edit service"><div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-3  sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose() }}>
+      <form data-dialog-panel="" onSubmit={submit}    className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-6">
           <div>
             <p className="text-xs font-bold uppercase tracking-wider text-emerald-600">Edit service</p>
             <h2 id="edit-service-title" className="mt-1 text-xl font-bold text-slate-950">{serviceName(service)}</h2>
           </div>
-          <button type="button" onClick={onClose} disabled={saving} aria-label="Close edit service" className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"><X size={18} /></button>
+          <button data-dialog-close="" type="button" onClick={onClose} disabled={saving} aria-label="Close edit service" className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"><X size={18} /></button>
         </div>
 
         <div className="overflow-y-auto px-5 py-5 sm:px-6">
-          {submitError && <div role="alert" className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">{submitError}</div>}
+          {submitError && <div  className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">{submitError}</div>}
 
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(16rem,.65fr)]">
             <div className="space-y-5">
@@ -507,28 +496,21 @@ function EditServiceModal({ service, saving, onClose, onSave }) {
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:px-6">
-          <button type="button" onClick={onClose} disabled={saving} className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-50">Cancel</button>
+          <button data-dialog-close="" type="button" onClick={onClose} disabled={saving} className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-50">Cancel</button>
           <button type="submit" disabled={saving} className="inline-flex h-11 min-w-36 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60">
             {saving ? <><LoaderCircle size={17} className="animate-spin" /> Saving</> : <><Save size={17} /> Save changes</>}
           </button>
         </div>
       </form>
-    </div>
+    </div></DialogPortal>
   )
 }
 
 function DeleteModal({ service, deleting, onClose, onConfirm }) {
-  useEffect(() => {
-    function closeOnEscape(event) {
-      if (event.key === 'Escape' && !deleting) onClose()
-    }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [deleting, onClose])
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !deleting) onClose() }}>
-      <div role="dialog" aria-modal="true" aria-labelledby="delete-service-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+    <DialogPortal onClose={onClose} busy={deleting} label="Delete service"><div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4 " role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !deleting) onClose() }}>
+      <div data-dialog-panel=""    className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
         <span className="grid h-12 w-12 place-items-center rounded-2xl bg-rose-50 text-rose-600"><AlertTriangle size={23} /></span>
         <h2 id="delete-service-title" className="mt-4 text-xl font-bold text-slate-950">Delete {serviceName(service)}?</h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">This permanently removes the service profile and it will no longer be bookable. Historical appointment records are retained.</p>
@@ -536,13 +518,13 @@ function DeleteModal({ service, deleting, onClose, onConfirm }) {
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-900">This service has {asNumber(service.totalAppointments)} recorded bookings.</div>
         )}
         <div className="mt-6 flex justify-end gap-2">
-          <button type="button" onClick={onClose} disabled={deleting} autoFocus className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Keep service</button>
+          <button data-dialog-close="" type="button" onClick={onClose} disabled={deleting} autoFocus className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Keep service</button>
           <button type="button" onClick={onConfirm} disabled={deleting} className="inline-flex h-11 min-w-32 items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 text-sm font-bold text-white hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60">
             {deleting ? <><LoaderCircle size={16} className="animate-spin" /> Deleting</> : <><Trash2 size={16} /> Delete service</>}
           </button>
         </div>
       </div>
-    </div>
+    </div></DialogPortal>
   )
 }
 
@@ -680,12 +662,6 @@ function serviceName(service) {
 function asNumber(value) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : 0
-}
-
-function formatCompactCurrency(value) {
-  const amount = asNumber(value)
-  if (amount < 1000) return `৳${amount.toLocaleString('en-BD')}`
-  return `৳${new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(amount)}`
 }
 
 function revokePreviewUrl(ref) {
